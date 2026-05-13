@@ -17,6 +17,7 @@ export interface ExecuteGoalToDocsStageInput {
   roles: RoleConfig[]
   artifactSummary: string
   findings?: ReviewFinding[]
+  reviewStatus?: ReviewResult['status']
 }
 
 export interface ExecuteGoalToDocsStageResult {
@@ -90,13 +91,19 @@ export function executeGoalToDocsStage(
     reviewerRole,
     artifactSummary: input.artifactSummary,
     findings: input.findings,
+    status: input.reviewStatus,
   })
 
   const finalStatus = review.status === 'accepted' ? 'accepted' : 'revising'
+  const statusUpdatedRun = updateGoalToDocsStageStatus(
+    inReviewRun,
+    input.stage.stageId,
+    finalStatus,
+  )
 
   const finalRun = {
-    ...updateGoalToDocsStageStatus(inReviewRun, input.stage.stageId, finalStatus),
-    stages: inReviewRun.stages.map((stageRecord) =>
+    ...statusUpdatedRun,
+    stages: statusUpdatedRun.stages.map((stageRecord) =>
       stageRecord.stageId === input.stage.stageId
         ? {
             ...stageRecord,

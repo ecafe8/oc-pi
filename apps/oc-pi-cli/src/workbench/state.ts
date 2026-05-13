@@ -92,6 +92,19 @@ export function setWorkbenchRuntimeStatus(state: WorkbenchState, runtimeStatus: 
   };
 }
 
+export function setWorkbenchInspectorExecutionStatus(
+  state: WorkbenchState,
+  runtimeStatus: RuntimeStatus,
+): WorkbenchState {
+  return {
+    ...state,
+    inspector: {
+      ...state.inspector,
+      lastExecutionStatus: runtimeStatus,
+    },
+  }
+}
+
 export function setWorkbenchReviewState(
   state: WorkbenchState,
   input: {

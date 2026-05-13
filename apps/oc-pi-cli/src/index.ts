@@ -3,6 +3,14 @@ import {
   PiModelAgentBridge,
   PiOAuthLoginBridge,
 } from '@/provider-adapters/index.js'
+import { runGoalToDocsMvp } from '@/planning/goal-to-docs/run-mvp.js'
+import { createDefaultWorkbenchState } from '@/runtime/default-config.js'
+import { getCliRootPath, getWorkspaceRootPath } from '@/runtime/paths.js'
+import { FileRuntimeSessionStore } from '@/runtime/session-store.js'
+import {
+  handleReviewLatest,
+  handleStatusShow,
+} from '@/workbench/controller/index.js'
 
 const SUPPORTED_AUTH_COMMANDS = ['login', 'api-key', 'status'] as const
 const DEFAULT_PROMPT_PROVIDER = 'github-copilot'
@@ -18,6 +26,21 @@ export async function main(): Promise<void> {
 
   if (scope === 'prompt') {
     await runPromptCommand(args)
+    return
+  }
+
+  if (scope === 'goal') {
+    await runGoalCommand(args)
+    return
+  }
+
+  if (scope === 'status') {
+    await runStatusCommand(args)
+    return
+  }
+
+  if (scope === 'review') {
+    await runReviewCommand(args)
     return
   }
 
@@ -92,6 +115,7 @@ async function runPromptCommand(args: string[]): Promise<void> {
   const provider = DEFAULT_PROMPT_PROVIDER
   const modelId = DEFAULT_PROMPT_MODEL_ID
   const prompt = args.join(' ')
+  const cliRoot = getCliRootPath()
   const credentials = await store.read(provider)
 
   if (!credentials) {
@@ -110,7 +134,7 @@ async function runPromptCommand(args: string[]): Promise<void> {
   await store.write(provider, next.newCredentials)
 
   const response = await agentBridge.prompt({
-    cwd: process.cwd(),
+    cwd: cliRoot,
     provider,
     modelId,
     prompt,
@@ -118,6 +142,79 @@ async function runPromptCommand(args: string[]): Promise<void> {
   })
 
   console.log(response.text)
+}
+
+async function runGoalCommand(args: string[]): Promise<void> {
+  const [command, ...goalParts] = args
+
+  if (command !== 'new') {
+    throw new Error(`Unsupported goal command: ${command ?? 'undefined'}. Expected: new`)
+  }
+
+  if (goalParts.length === 0) {
+    throw new Error('Missing goal text. Example: bun run src/index.ts goal new 做一个本地 AI 规划工作台')
+  }
+
+  const goal = goalParts.join(' ')
+  const cliRoot = getCliRootPath()
+  const workspaceRoot = getWorkspaceRootPath()
+  const sessionStore = new FileRuntimeSessionStore(cliRoot)
+  const result = await runGoalToDocsMvp({
+    goal,
+    cliRoot,
+    workspaceRoot,
+  })
+
+  await sessionStore.write({
+    workbenchState: result.workbenchState,
+    latestRun: result.run,
+  })
+
+  console.log(
+    JSON.stringify(
+      {
+        command: 'goal.new',
+        acceptedGoal: goal,
+        artifactPath: result.artifactPath,
+        reviewStatus: result.review.status,
+        reviewSummary: result.review.summary,
+      },
+      null,
+      2,
+    ),
+  )
+}
+
+async function runStatusCommand(args: string[]): Promise<void> {
+  const [command] = args
+
+  if (command !== 'show') {
+    throw new Error(`Unsupported status command: ${command ?? 'undefined'}. Expected: show`)
+  }
+
+  const cliRoot = getCliRootPath()
+  const sessionStore = new FileRuntimeSessionStore(cliRoot)
+  const session = await sessionStore.read()
+  const state = session?.workbenchState ?? createDefaultWorkbenchState(cliRoot)
+  const result = handleStatusShow(state)
+
+  console.log(JSON.stringify(result.command, null, 2))
+}
+
+async function runReviewCommand(args: string[]): Promise<void> {
+  const [command] = args
+
+  if (command !== 'latest') {
+    throw new Error(`Unsupported review command: ${command ?? 'undefined'}. Expected: latest`)
+  }
+
+  const cliRoot = getCliRootPath()
+  const sessionStore = new FileRuntimeSessionStore(cliRoot)
+  const session = await sessionStore.read()
+  const state = session?.workbenchState ?? createDefaultWorkbenchState(cliRoot)
+  const result = handleReviewLatest(state)
+
+  console.log(JSON.stringify(result.command, null, 2))
 }
 
 function isSupportedAuthCommand(
@@ -129,6 +226,9 @@ function isSupportedAuthCommand(
 function printUsage(): void {
   console.log('Usage: bun run src/index.ts auth <login|api-key|status> <provider>')
   console.log('Usage: bun run src/index.ts prompt <message>')
+  console.log('Usage: bun run src/index.ts goal new <goal>')
+  console.log('Usage: bun run src/index.ts status show')
+  console.log('Usage: bun run src/index.ts review latest')
 }
 
 void main().catch((error: unknown) => {

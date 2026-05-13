@@ -37,6 +37,9 @@ yarn-error.log*
 # TypeScript incremental build cache
 *.tsbuildinfo
 
+# Local oc-pi-cli runtime state
+.oc-pi-cli/
+
 
 # IDEs and editors
 .history
