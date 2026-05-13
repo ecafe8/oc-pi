@@ -9,7 +9,7 @@ Backlog 待办池用于记录当前产品规划阶段尚未开工的高优先任
 
 ## High Priority 高优先级
 
-- 定义 `project bootstrap 项目初始化` 的最小输出结构
+- 定义 `project bootstrap 项目初始化` 的最小输出结构与默认模板集合
 - 定义 `goal-to-docs 目标到文档` 的产物清单与阶段流程
 - 定义 `agent-role-config 角色化代理配置` 的最小配置协议
 - 定义 `review-loop 审查循环` 的输入输出边界

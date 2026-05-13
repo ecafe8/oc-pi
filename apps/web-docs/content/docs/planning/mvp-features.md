@@ -20,6 +20,8 @@ MVP Features MVP 功能清单用于固定当前阶段最值得优先规划和实
 
 Project Bootstrap 项目初始化用于快速生成一个可被 `oc-pi-cli` 接管的工作空间，而不只是复制目录。
 
+相关阅读: [Project Bootstrap 项目初始化草案](./project-bootstrap)
+
 ### Scope 范围
 
 - 初始化基础工作空间
