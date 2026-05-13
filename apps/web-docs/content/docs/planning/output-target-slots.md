@@ -143,7 +143,7 @@ slots:
     name: Review Notes
     description: 审查结果落点
     kind: review
-    defaultPath: apps/web-docs/content/docs/tasks/backlog.md
+    defaultPath: apps/web-docs/content/docs/tasks/review-notes.md
 
   - slotId: implementation-code
     name: Implementation Code
