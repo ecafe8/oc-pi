@@ -95,3 +95,4 @@ review:
 - [Agent Role Config 角色配置协议](./agent-role-config)
 - [Output Target Slots 输出槽位协议](./output-target-slots)
 - [Goal-to-Docs 目标到文档草案](./goal-to-docs)
+- [Runtime TypeScript Protocol 运行时 TypeScript 协议草案](./runtime-typescript-protocol)

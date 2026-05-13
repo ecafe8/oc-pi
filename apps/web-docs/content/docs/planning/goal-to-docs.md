@@ -342,5 +342,6 @@ Open Questions 待定问题用于标记后续还需继续细化的部分。
 
 - [MVP Features MVP 功能清单](./mvp-features)
 - [Agent Role Config 角色配置协议](./agent-role-config)
+- [Runtime TypeScript Protocol 运行时 TypeScript 协议草案](./runtime-typescript-protocol)
 - [Template System 模板系统](./template-system)
 - [Module Structure 模块结构草案](../architecture/oc-pi-cli-module-structure)

@@ -222,3 +222,4 @@ Open Questions 待定问题用于记录后续还要继续细化的部分。
 - [Agent Role Config 角色配置协议](./agent-role-config)
 - [Goal-to-Docs 目标到文档草案](./goal-to-docs)
 - [MVP Features MVP 功能清单](./mvp-features)
+- [Runtime TypeScript Protocol 运行时 TypeScript 协议草案](./runtime-typescript-protocol)
