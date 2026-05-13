@@ -1,27 +1,29 @@
 ---
-title: OC PI Framework Docs
-description: 本地 docs-native 自动化开发框架的目标、协议、feature 与进度总览
+title: OC PI Docs 文档总览
+description: 用于讨论与规划 apps/oc-pi-cli 产品目标、能力地图、架构与任务拆解的文档入口
 ---
 
-# OC PI Framework Docs
+# OC PI Docs 文档总览
 
-这套文档把 `apps/web-docs/content/docs` 作为本地控制平面，用来承载：
+OC PI Docs 文档总览用于组织当前仓库内 `apps/oc-pi-cli` 的产品目标、能力规划、架构设计与任务推进。
 
-- 项目级目标、里程碑与全局进度
-- `initiative -> feature -> requirement -> task` 的分解规则
-- 单个 feature 的 PRD、技术定义、任务图与进度摘要
-- 未来由 `apps/oc-pi-cli/src` 驱动的 PI 循环入口与实现边界
+## 当前边界
+
+- 当前 `apps/web-docs` 是我们讨论 `apps/oc-pi-cli` 的文档空间
+- 当前 `apps/oc-pi-cli` 是产品主开发目录
+- 面向用户初始化出来的 monorepo 与 `web-docs` 模板尚未正式建立
 
 ## 文档导航
 
-- [Project Overview](./project/overview)
-- [Protocols Overview](./protocols/overview)
-- [Features Overview](./features/overview)
+- [Product Vision 产品愿景](./product/vision)
+- [Capabilities Overview 能力总览](./capabilities/overview)
+- [Architecture Overview 架构总览](./architecture/system-overview)
+- [Pi Capability Reuse PI 能力复用对照](./architecture/pi-capability-reuse)
+- [Planning Rules 规划规则](./planning/decomposition-rules)
+- [Task Board 任务看板](./tasks/backlog)
 
-## 当前探索结论
+## 当前目标
 
-- 文档系统本身承担控制平面角色，不再依赖外部 OpenSpec 层。
-- 全局层负责 `goal / initiative / milestone / global progress`。
-- Feature 层负责 `feature / version / requirement / decision`。
-- 执行层负责 `task / progress entry / review check`。
-- 后续实现代码放在 `apps/oc-pi-cli/src`，当前文档只负责定义协议与边界。
+- 定义 `apps/oc-pi-cli` 的一级能力地图
+- 定义后续生成模板、loop、AI 编排的产品边界
+- 把产品讨论收敛成可执行的 feature 与 task
