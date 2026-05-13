@@ -19,9 +19,11 @@ Global Status 全局状态用于聚合当前 `apps/oc-pi-cli` 产品规划阶段
 - 未来“用户项目模板”和“当前产品实现”仍容易被概念混淆
 - loop 输入输出契约还未正式固定
 - 角色化 Agent 配置目前只有产品方向，还没有配置协议草案
+- 交互工作台与外部接入的产品边界还未完全定义
 
 ## Next Focus 下一步聚焦
 
 - 固定第一批 MVP feature 功能列表
 - 固定 `agent-role-config 角色化代理配置` 的最小配置模型
 - 固定 `goal-to-docs 目标到文档` 的文档输出范围
+- 固定 `interactive-workbench 交互工作台` 的最小交互范围

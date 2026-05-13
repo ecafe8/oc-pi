@@ -14,6 +14,7 @@ MVP Features MVP 功能清单用于固定当前阶段最值得优先规划和实
 - `agent-role-config 角色化代理配置`
 - `review-loop 审查循环`
 - `artifact-routing 产物路由`
+- `interactive-workbench 交互工作台`
 
 ## 1. Project Bootstrap 项目初始化
 
@@ -77,6 +78,23 @@ Artifact Routing 产物路由用于定义不同角色输出的内容应该写到
 - 代码产物写入实现位置
 - 审查结果写入 review 或状态摘要位置
 
+## 6. Interactive Workbench 交互工作台
+
+Interactive Workbench 交互工作台用于为用户提供一个基于 `TUI 终端用户界面` 的交互入口，类似 OpenCode 或 Claude Code 的终端操作体验。
+
+### Scope 范围
+
+- 提供对话入口
+- 提供命令入口
+- 提供角色配置入口
+- 提供状态反馈与审查反馈入口
+- 基于 Pi 的 `InteractiveMode 交互模式` 与 UI dialogs 对话框能力构建产品工作台
+
+### Direction 方向
+
+- 第一版优先建立最小终端工作台
+- 外部应用接入能力先不纳入 MVP 主闭环，但需保留后续扩展空间
+
 ## Planning Note 规划说明
 
 Planning Note 规划说明用于强调这五项功能共同构成当前阶段的最小产品闭环。
@@ -88,4 +106,5 @@ User Goal 用户目标
   -> Agent-Role-Config 角色化代理配置
   -> Review Loop 审查循环
   -> Artifact Routing 产物路由
+  -> Interactive Workbench 交互工作台
 ```

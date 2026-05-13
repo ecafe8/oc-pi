@@ -26,6 +26,7 @@ Roadmap 路线图用于定义 `apps/oc-pi-cli` 的阶段目标，而不是单条
 - 角色化 Agent 配置能力
 - review loop 审查循环能力
 - artifact routing 产物路由能力
+- interactive workbench 交互工作台能力
 
 ## Phase 3 第三阶段
 
@@ -34,6 +35,7 @@ Roadmap 路线图用于定义 `apps/oc-pi-cli` 的阶段目标，而不是单条
 - 生成产品规划模板
 - 生成运行时输出模板
 - 生成未来用户项目模板草案
+- 规划外部应用接入能力草案
 
 ## Phase 4 第四阶段
 
