@@ -1,3 +1,6 @@
+import { createInterface } from 'node:readline/promises'
+import { stdin as input, stdout as output } from 'node:process'
+
 import type {
   OAuthCredentialMap,
   OAuthCredentials,
@@ -49,8 +52,12 @@ export class PiOAuthLoginBridge implements PiLoginBridge, PiOAuthBridge {
           console.log(instructions)
         }
       },
-      onPrompt: async ({ message }) => {
-        throw new Error(`Interactive prompt required for OAuth login: ${message}`)
+      onPrompt: async ({ message, placeholder, allowEmpty }) => {
+        return promptForOAuthInput({
+          message,
+          placeholder,
+          allowEmpty,
+        })
       },
       onProgress: (message) => {
         console.log(message)
@@ -80,5 +87,30 @@ export class PiOAuthLoginBridge implements PiLoginBridge, PiOAuthBridge {
       apiKey: result.apiKey,
       newCredentials: result.newCredentials,
     }
+  }
+}
+
+async function promptForOAuthInput(inputOptions: {
+  message: string
+  placeholder?: string
+  allowEmpty?: boolean
+}): Promise<string> {
+  const rl = createInterface({ input, output })
+
+  try {
+    const suffix = inputOptions.placeholder
+      ? ` (${inputOptions.placeholder})`
+      : inputOptions.allowEmpty
+        ? ' (press Enter to leave blank)'
+        : ''
+    const answer = await rl.question(`${inputOptions.message}${suffix}: `)
+
+    if (!answer && !inputOptions.allowEmpty) {
+      throw new Error(`OAuth input is required: ${inputOptions.message}`)
+    }
+
+    return answer
+  } finally {
+    rl.close()
   }
 }
