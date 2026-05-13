@@ -9,7 +9,7 @@ Next Up 下一步页用于提示当前文档规划完成后最值得继续推进
 
 ## Recommended Next Steps 建议下一步
 
-- 细化 `apps/oc-pi-cli` 的一级 feature 功能列表
+- 定义 MVP feature 功能列表
+- 定义 `agent-role-config 角色化代理配置` 的配置模型
+- 定义 `goal-to-docs 目标到文档` 的文档输出协议
 - 定义 `apps/oc-pi-cli/src` 的模块结构草案
-- 定义 loop contract 循环契约草案
-- 定义 template manifest 模板清单草案
