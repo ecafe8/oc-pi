@@ -27,6 +27,7 @@ export interface PiPromptRequest {
   provider: string
   modelId: string
   prompt: string
+  apiKey?: string
 }
 
 export interface PiPromptResponse {

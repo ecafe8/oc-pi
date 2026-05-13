@@ -6,6 +6,7 @@ export {
 export {
   PlaceholderPiAgentBridge,
   PlaceholderPiLoginBridge,
+  PiModelAgentBridge,
   PiOAuthLoginBridge,
 } from '@/provider-adapters/pi-agent-bridge.js'
 export { FileOAuthCredentialStore } from '@/auth/oauth-credential-store.js'

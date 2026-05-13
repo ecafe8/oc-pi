@@ -1,6 +1,7 @@
 import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 
+import { completeSimple, getModels } from '@earendil-works/pi-ai'
 import type {
   OAuthCredentialMap,
   OAuthCredentials,
@@ -20,6 +21,51 @@ export class PlaceholderPiAgentBridge implements PiAgentBridge {
   public async prompt(request: PiPromptRequest): Promise<PiPromptResponse> {
     return {
       text: `[placeholder:${request.provider}/${request.modelId}] ${request.prompt}`,
+    }
+  }
+}
+
+export class PiModelAgentBridge implements PiAgentBridge {
+  public async prompt(request: PiPromptRequest): Promise<PiPromptResponse> {
+    if (request.provider !== 'github-copilot') {
+      throw new Error(`Real prompt bridge is not implemented for provider: ${request.provider}`)
+    }
+
+    if (!request.apiKey) {
+      throw new Error(`API key is required for provider: ${request.provider}`)
+    }
+
+    const model = getModels('github-copilot').find(
+      (candidate) => candidate.id === request.modelId,
+    )
+
+    if (!model) {
+      throw new Error(`No GitHub Copilot model found for model ID: ${request.modelId}`)
+    }
+
+    const response = await completeSimple(
+      model,
+      {
+        messages: [
+          {
+            role: 'user',
+            content: request.prompt,
+            timestamp: Date.now(),
+          },
+        ],
+      },
+      {
+        apiKey: request.apiKey,
+        reasoning: 'minimal',
+      },
+    )
+
+    return {
+      text: response.content
+        .filter((item) => item.type === 'text')
+        .map((item) => item.text)
+        .join('')
+        .trim(),
     }
   }
 }

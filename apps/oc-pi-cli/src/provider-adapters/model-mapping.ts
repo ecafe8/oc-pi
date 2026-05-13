@@ -45,7 +45,7 @@ export const DEFAULT_PROVIDER_MODEL_MAPPINGS: ProviderModelMapping[] = [
   {
     provider: 'github-copilot',
     logicalModelId: 'copilot-chat-model',
-    resolvedModelId: 'gpt-4o',
+    resolvedModelId: 'gpt-5-mini',
     authMode: 'oauth',
   },
 ]
