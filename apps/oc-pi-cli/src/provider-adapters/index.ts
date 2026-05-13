@@ -3,11 +3,20 @@ export {
   resolveProviderModel,
   resolveProviderModelForRole,
 } from '@/provider-adapters/model-mapping.js'
-export { PlaceholderPiAgentBridge } from '@/provider-adapters/pi-agent-bridge.js'
+export {
+  PlaceholderPiAgentBridge,
+  PlaceholderPiLoginBridge,
+} from '@/provider-adapters/pi-agent-bridge.js'
 export type {
+  OAuthCredentialRecord,
+  OAuthCredentials,
   PiAgentBridge,
+  PiLoginBridge,
+  PiLoginRequest,
+  PiLoginResponse,
   PiPromptRequest,
   PiPromptResponse,
+  ProviderAuthMode,
   ProviderModelMapping,
   ResolveProviderModelInput,
   ResolvedProviderModel,

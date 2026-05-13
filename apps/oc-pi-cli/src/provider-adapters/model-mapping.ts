@@ -10,31 +10,43 @@ export const DEFAULT_PROVIDER_MODEL_MAPPINGS: ProviderModelMapping[] = [
     provider: 'openai',
     logicalModelId: 'planner-model',
     resolvedModelId: 'gpt-5.4',
+    authMode: 'api-key',
   },
   {
     provider: 'anthropic',
     logicalModelId: 'reviewer-model',
     resolvedModelId: 'claude-sonnet-4-5',
+    authMode: 'api-key',
   },
   {
     provider: 'openai',
     logicalModelId: 'doc-writer-model',
     resolvedModelId: 'gpt-5.4',
+    authMode: 'api-key',
   },
   {
     provider: 'anthropic',
     logicalModelId: 'doc-reviewer-model',
     resolvedModelId: 'claude-sonnet-4-5',
+    authMode: 'api-key',
   },
   {
     provider: 'anthropic',
     logicalModelId: 'code-writer-model',
     resolvedModelId: 'claude-sonnet-4-5',
+    authMode: 'api-key',
   },
   {
     provider: 'openai',
     logicalModelId: 'code-reviewer-model',
     resolvedModelId: 'gpt-5.4',
+    authMode: 'api-key',
+  },
+  {
+    provider: 'github-copilot',
+    logicalModelId: 'copilot-chat-model',
+    resolvedModelId: 'gpt-4o',
+    authMode: 'oauth',
   },
 ]
 
@@ -56,6 +68,7 @@ export function resolveProviderModel(
     provider: mapping.provider,
     logicalModelId: mapping.logicalModelId,
     resolvedModelId: mapping.resolvedModelId,
+    authMode: mapping.authMode ?? 'api-key',
   }
 }
 
