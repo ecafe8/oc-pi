@@ -88,6 +88,8 @@ Artifact Routing 产物路由用于定义不同角色输出的内容应该写到
 
 Interactive Workbench 交互工作台用于为用户提供一个基于 `TUI 终端用户界面` 的交互入口，类似 OpenCode 或 Claude Code 的终端操作体验。
 
+相关阅读: [Interactive Workbench 交互工作台草案](./interactive-workbench)
+
 ### Scope 范围
 
 - 提供对话入口
