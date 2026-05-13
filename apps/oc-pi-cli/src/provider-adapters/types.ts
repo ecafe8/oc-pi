@@ -1,4 +1,5 @@
 import type { RoleConfig } from '@/shared/types/artifacts.js'
+import type { OAuthCredentials as PiOAuthCredentials } from '@earendil-works/pi-ai/oauth'
 
 export interface ProviderModelMapping {
   provider: string
@@ -36,16 +37,14 @@ export interface PiAgentBridge {
   prompt(request: PiPromptRequest): Promise<PiPromptResponse>
 }
 
-export interface OAuthCredentials {
-  refresh: string
-  access: string
-  expires: number
-}
+export type OAuthCredentials = PiOAuthCredentials
 
 export interface OAuthCredentialRecord {
   provider: string
   credentials: OAuthCredentials
 }
+
+export type OAuthCredentialMap = Record<string, OAuthCredentials>
 
 export interface PiLoginRequest {
   provider: string
@@ -58,4 +57,19 @@ export interface PiLoginResponse {
 
 export interface PiLoginBridge {
   login(request: PiLoginRequest): Promise<PiLoginResponse>
+}
+
+export interface PiOAuthApiKeyRequest {
+  provider: string
+  credentials: OAuthCredentialMap
+}
+
+export interface PiOAuthApiKeyResponse {
+  provider: string
+  apiKey: string
+  newCredentials: OAuthCredentials
+}
+
+export interface PiOAuthBridge {
+  getApiKey(request: PiOAuthApiKeyRequest): Promise<PiOAuthApiKeyResponse | null>
 }
