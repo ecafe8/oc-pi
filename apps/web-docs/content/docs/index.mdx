@@ -1,0 +1,27 @@
+---
+title: OC PI Framework Docs
+description: 本地 docs-native 自动化开发框架的目标、协议、feature 与进度总览
+---
+
+# OC PI Framework Docs
+
+这套文档把 `apps/web-docs/content/docs` 作为本地控制平面，用来承载：
+
+- 项目级目标、里程碑与全局进度
+- `initiative -> feature -> requirement -> task` 的分解规则
+- 单个 feature 的 PRD、技术定义、任务图与进度摘要
+- 未来由 `apps/oc-pi-cli/src` 驱动的 PI 循环入口与实现边界
+
+## 文档导航
+
+- [Project Overview](./project/overview)
+- [Protocols Overview](./protocols/overview)
+- [Features Overview](./features/overview)
+
+## 当前探索结论
+
+- 文档系统本身承担控制平面角色，不再依赖外部 OpenSpec 层。
+- 全局层负责 `goal / initiative / milestone / global progress`。
+- Feature 层负责 `feature / version / requirement / decision`。
+- 执行层负责 `task / progress entry / review check`。
+- 后续实现代码放在 `apps/oc-pi-cli/src`，当前文档只负责定义协议与边界。

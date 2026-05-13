@@ -1,0 +1,21 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./apps/web-template"
+    },
+    {
+      "path": "./apps/server-template"
+    },
+    {
+      "path": "./packages/share-ui"
+    },
+    {
+      "path": "./packages/share-backend"
+    },
+    {
+      "path": "./packages/share-ext"
+    }
+  ],
+  "exclude": ["resource"]
+}

@@ -1,0 +1,58 @@
+schema: spec-driven
+
+context: |
+  使用中文对话与输出 artifacts。
+  项目：octopus-ai-monorepo（模板仓库）
+
+  Monorepo 约定：
+  - 包管理器：bun（以 bun.lock 为准）
+  - 构建编排：Turborepo
+  - 工作区：apps/* 与 packages/*
+  - 主要应用：apps/web-template（Next.js App Router）、apps/server-template（Hono + Node server）
+  - 共享库：packages/share-ui、packages/share-backend、packages/typescript-config、packages/biome-config
+
+  技术基线：
+  - TypeScript 严格模式、React 19、Next.js 16、Hono、Drizzle ORM、PostgreSQL
+  - 代码检查/格式化：Biome
+  - RPC 流程：server 导出 RPC 类型，web 侧生成类型化 RPC hooks
+
+  架构约束：
+  - 坚持模板优先（template-first），避免过度贴合单一业务场景
+  - 优先采用增量、低摩擦变更，避免单个 change 做大范围重写
+  - 保持前后端运行时边界清晰
+  - 允许共享类型，但 frontend 不得引入 server 运行时专属模块
+  - 生成文件必须可由脚本稳定复现，并有清晰标识
+
+  验证期望：
+  - 只要涉及代码变更，需在 artifacts 中写明预期验证命令
+  - 优先使用：bun run lint、bun run check-types，以及受影响 app/package 的定向检查
+  - 若某验证步骤有意延后，需在 tasks 或 risks 中明确说明
+
+rules:
+  proposal:
+    - 建议控制在约 500 词以内，重点说明 why/what，不展开实现细节。
+    - 在 What Changes 中明确列出 In Scope 与 Out of Scope。
+    - Capabilities 使用 kebab-case 命名，且保持最小必要集合。
+    - 若存在破坏性变更，必须在 What Changes 中标注 "**BREAKING**"。
+    - 若涉及生成流程调整，需说明对脚本与工具链的影响。
+
+  design:
+    - 当 change 影响 2 个及以上 packages/apps、引入边界规则、或改变生成/工具行为时，必须编写 design。
+    - 至少给出 2 个备选方案，并写明采纳/不采纳原因。
+    - 增加简短的 Compatibility 小节，说明对现有模板使用者的兼容与迁移策略。
+    - 涉及跨包导入时，必须记录具体 guardrails（lint、路径边界、type-only import 规则）。
+    - 所有设计决策需可追溯到 proposal 中的 capabilities。
+
+  specs:
+    - 所有 requirement 使用规范性措辞（MUST/SHALL）。
+    - 每个 requirement 至少包含一个可测试场景，并使用 WHEN/THEN。
+    - 优先使用 ADDED；仅在既有行为确实变化时使用 MODIFIED。
+    - 使用 REMOVED 时，必须同时包含 Reason 与 Migration。
+    - specs 保持实现无关，不写文件级编码指令。
+
+  tasks:
+    - 必须严格使用复选框格式："- [ ] X.Y ..."。
+    - 按依赖顺序组织任务：setup -> implementation -> validation -> docs/release。
+    - 每个任务应可在一次专注开发中完成，且具备明确完成标准。
+    - 必须包含 lint/typecheck/tests 的验证任务；若省略需说明原因。
+    - 任何面向开发者的工作流变更，都要包含迁移/文档任务。

@@ -1,0 +1,4 @@
+[submodule "resource/ai-elements"]
+	path = resource/ai-elements
+	url = https://github.com/vercel/ai-elements.git
+	ignore = dirty
