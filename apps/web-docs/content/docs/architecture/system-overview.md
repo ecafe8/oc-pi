@@ -39,4 +39,5 @@ Future Generated Project 未来生成项目
 
 ## Related Reading 相关阅读
 
+- [Module Structure 模块结构草案](./oc-pi-cli-module-structure)
 - [Pi Capability Reuse PI 能力复用对照](./pi-capability-reuse)
