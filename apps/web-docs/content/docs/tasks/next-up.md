@@ -9,8 +9,8 @@ Next Up 下一步页用于提示当前文档规划完成后最值得继续推进
 
 ## Recommended Next Steps 建议下一步
 
-- 细化 `goal-to-docs 目标到文档` 的产物清单与阶段流程
-- 固定 `agent-role-config 角色化代理配置` 与 `goal-to-docs 目标到文档` 的角色协作关系
-- 固定 `project bootstrap 项目初始化` 应预置哪些 goal-to-docs 模板与槽位映射
-- 把 `interactive-workbench 交互工作台` 的视图结构映射到运行时状态模型
-- 细化 `apps/oc-pi-cli/src` 的模块结构草案与 provider adapter 提供商适配层边界
+- 确认 [Development Plan Framework 开发计划框架](../planning/development-plan-framework) 作为后续实现总路线
+- 确认 [Docs Structure and Output Spec 文档结构与输出规范](../planning/docs-structure-and-output-spec) 作为默认文档落点真源
+- 确认并执行 [Dev Task Runtime Type Skeleton 开发任务 运行时类型骨架](./dev-task-runtime-type-skeleton)
+- 在类型骨架落地后开始 `goal-to-docs` run state 空实现
+- 在类型骨架落地后开始 `workbench` state 空实现
