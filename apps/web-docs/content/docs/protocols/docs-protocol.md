@@ -1,11 +1,13 @@
 ---
-title: Docs Protocol
-description: docs-native 控制平面的目录、front matter 与结构化数据约定
+title: Docs Protocol 文档协议
+description: docs-native 文档原生控制平面的目录、front matter 页面头信息与结构化数据约定
 ---
 
-# Docs Protocol
+# Docs Protocol 文档协议
 
-## Principle
+Docs Protocol 文档协议定义这套文档控制平面如何组织目录、页面元数据与结构化控制信息。
+
+## Principle 原则
 
 ```text
 Docs are the workspace.
@@ -14,13 +16,15 @@ PI is the operator.
 Loops are the engine.
 ```
 
-## Content Layers
+## Content Layers 内容分层
 
-- Narrative: 给人阅读和讨论的说明文档
-- Structured Control Data: 给人和机器共享的字段与协议
-- Operational Logs: 由循环追加的进度、阻塞与 review 结果
+- Narrative 叙述层: 给人阅读和讨论的说明文档
+- Structured Control Data 结构化控制数据层: 给人和机器共享的字段与协议
+- Operational Logs 运行日志层: 由循环追加的进度、阻塞与 review 结果
 
-## Front Matter Rule
+## Front Matter Rule 页面头信息规则
+
+Front Matter 页面头信息用于描述页面的最小元数据。
 
 每个页面至少包含：
 
@@ -35,7 +39,9 @@ Loops are the engine.
 - `feature`
 - `version`
 
-## Suggested Structured Fragments
+## Suggested Structured Fragments 建议结构化片段
+
+下面的字段示例中，`id` 表示唯一标识，`status` 表示状态，`owner` 表示责任人，`stage` 表示阶段。
 
 ```yaml
 feature:
@@ -48,7 +54,7 @@ version:
   stage: planned
 ```
 
-## Suggested Directory Shape
+## Suggested Directory Shape 建议目录结构
 
 ```text
 content/docs/

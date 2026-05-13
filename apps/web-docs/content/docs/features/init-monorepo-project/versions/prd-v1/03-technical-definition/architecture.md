@@ -1,11 +1,13 @@
 ---
-title: Init Monorepo Project Architecture
-description: 默认 monorepo 初始化 feature 的技术定义
+title: Init Monorepo Project Architecture 初始化项目技术定义
+description: 默认 monorepo 初始化 feature 功能单元的技术定义
 ---
 
-# Init Monorepo Project Architecture
+# Init Monorepo Project Architecture 初始化项目技术定义
 
-## Flow
+Architecture 技术架构页用于描述初始化流程的技术骨架和关键落点。
+
+## Flow 流程
 
 ```text
 CLI init command
@@ -16,7 +18,7 @@ CLI init command
   -> print next-step summary
 ```
 
-## Architectural Notes
+## Architectural Notes 架构说明
 
 - 初始化逻辑将落在 `apps/oc-pi-cli/src`
 - `web-docs` 文档控制平面是初始化产物的一部分

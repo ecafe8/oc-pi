@@ -1,25 +1,33 @@
 ---
-title: Decomposition Rules
-description: 从全局目标向下拆分 initiative、feature 与 task 的规则
+title: Decomposition Rules 分解规则
+description: 从全局目标向下拆分 initiative、feature、requirement 与 task 的规则
 ---
 
-# Decomposition Rules
+# Decomposition Rules 分解规则
 
-## Rule Chain
+Decomposition Rules 分解规则用于说明这套系统如何从全局目标逐层拆到可执行任务。
+
+## Rule Chain 规则链路
 
 ```text
-Goal -> Initiative -> Feature -> Requirement -> Task
+Goal 目标 -> Initiative 计划主题 -> Feature 功能单元 -> Requirement 需求条目 -> Task 任务
 ```
 
-## Goal Rule
+## Goal Rule 目标规则
+
+Goal Rule 目标规则说明什么样的事项应被视为项目级目标。
 
 一个 `goal` 应描述长期方向，而不是某个实现动作。
 
-## Initiative Rule
+## Initiative Rule 计划主题规则
+
+Initiative Rule 计划主题规则说明什么样的事项应被视为能力建设主题。
 
 一个 `initiative` 应描述一类持续建设主题，通常可拆成 `2-5` 个 feature。
 
-## Feature Rule
+## Feature Rule 功能单元规则
+
+Feature Rule 功能单元规则说明什么样的事项应被视为独立交付边界。
 
 一个 `feature` 应同时满足：
 
@@ -29,7 +37,9 @@ Goal -> Initiative -> Feature -> Requirement -> Task
 - 能被单独跟踪进度
 - 完成后系统状态有明确变化
 
-## Task Rule
+## Task Rule 任务规则
+
+Task Rule 任务规则说明什么样的事项应被视为可执行动作。
 
 一个 `task` 应满足：
 
@@ -39,7 +49,9 @@ Goal -> Initiative -> Feature -> Requirement -> Task
 - 可以判断 done / blocked / verified
 - 最好有依赖关系
 
-## Anti-Patterns
+## Anti-Patterns 反模式
+
+Anti-Patterns 反模式用于提醒哪些拆分方式会让控制平面失稳。
 
 - 不直接从 `goal` 拆 `task`
 - 不按 `frontend/backend/docs` 直接拆 feature

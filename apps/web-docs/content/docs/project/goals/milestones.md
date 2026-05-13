@@ -1,9 +1,11 @@
 ---
-title: Milestones
+title: Milestones 里程碑
 description: 从探索到可运行 MVP 的阶段性里程碑
 ---
 
-# Milestones
+# Milestones 里程碑
+
+Milestones 里程碑用于定义项目从探索到可运行 MVP 的阶段目标。
 
 ## M1: Docs Protocol Stabilized
 

@@ -1,22 +1,26 @@
 ---
-title: Create Feature Workspace
-description: 创建 feature 文档工作空间的 feature 总览
+title: Create Feature Workspace 创建功能工作空间
+description: 创建 feature 功能文档工作空间的总览
 ---
 
-# Create Feature Workspace
+# Create Feature Workspace 创建功能工作空间
 
-## Meta
+Create Feature Workspace 创建功能工作空间是一个 feature 功能单元，用于定义标准文档工作空间如何被生成。
+
+## Meta 元数据
+
+Meta 元数据用于描述该 feature 功能单元的标识、所属 initiative 计划主题、状态与实现落点。
 
 ```yaml
 feature:
-  id: create-feature-workspace
-  initiative: docs-native-control-plane
-  status: definition
-  owner: pi
-  implementationRoot: apps/oc-pi-cli/src
+  id: create-feature-workspace # 唯一标识
+  initiative: docs-native-control-plane # 所属计划主题
+  status: definition # 当前状态
+  owner: pi # 责任主体
+  implementationRoot: apps/oc-pi-cli/src # 实现目录
 ```
 
-## Current Version
+## Current Version 当前版本
 
 - [PRD V1 Foundation](./versions/prd-v1/00-foundation/README)
 - [PRD V1 Product Definition](./versions/prd-v1/01-product/prd)

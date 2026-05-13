@@ -1,11 +1,13 @@
 ---
-title: Create Feature Workspace Architecture
-description: 创建 feature 文档工作空间的技术定义
+title: Create Feature Workspace Architecture 功能工作空间技术定义
+description: 创建 feature 功能文档工作空间的技术定义
 ---
 
-# Create Feature Workspace Architecture
+# Create Feature Workspace Architecture 功能工作空间技术定义
 
-## Flow
+Architecture 技术架构页用于描述 feature 功能工作空间生成流程的技术结构与关键落点。
+
+## Flow 流程
 
 ```text
 CLI create-feature command
@@ -16,7 +18,7 @@ CLI create-feature command
   -> print refinement checklist
 ```
 
-## Architectural Notes
+## Architectural Notes 架构说明
 
 - 生成器逻辑将位于 `apps/oc-pi-cli/src`
 - docs 结构必须足够稳定，便于 PI loop 后续追加 progress 与 review 信息
