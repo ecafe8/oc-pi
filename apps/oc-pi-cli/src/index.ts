@@ -5,7 +5,7 @@ import {
 } from '@/provider-adapters/index.js'
 import { runGoalToDocsMvp } from '@/planning/goal-to-docs/run-mvp.js'
 import { createDefaultWorkbenchState } from '@/runtime/default-config.js'
-import { getCliRootPath, getWorkspaceRootPath } from '@/runtime/paths.js'
+import { getCliRootPath } from '@/runtime/paths.js'
 import { FileRuntimeSessionStore } from '@/runtime/session-store.js'
 import {
   handleReviewLatest,
@@ -145,7 +145,9 @@ async function runPromptCommand(args: string[]): Promise<void> {
 }
 
 async function runGoalCommand(args: string[]): Promise<void> {
-  const [command, ...goalParts] = args
+  const writeArtifacts = args.includes('--write-docs')
+  const filteredArgs = args.filter((arg) => arg !== '--write-docs')
+  const [command, ...goalParts] = filteredArgs
 
   if (command !== 'new') {
     throw new Error(`Unsupported goal command: ${command ?? 'undefined'}. Expected: new`)
@@ -157,25 +159,29 @@ async function runGoalCommand(args: string[]): Promise<void> {
 
   const goal = goalParts.join(' ')
   const cliRoot = getCliRootPath()
-  const workspaceRoot = getWorkspaceRootPath()
   const sessionStore = new FileRuntimeSessionStore(cliRoot)
   const result = await runGoalToDocsMvp({
     goal,
     cliRoot,
-    workspaceRoot,
+    writeArtifacts,
   })
 
-  await sessionStore.write({
-    workbenchState: result.workbenchState,
-    latestRun: result.run,
-  })
+  if (writeArtifacts) {
+    await sessionStore.write({
+      workbenchState: result.workbenchState,
+      latestRun: result.run,
+    })
+  }
 
   console.log(
     JSON.stringify(
       {
         command: 'goal.new',
+        mode: writeArtifacts ? 'write' : 'preview',
         acceptedGoal: goal,
         artifactPath: result.artifactPath,
+        artifactAbsolutePath: result.artifactAbsolutePath,
+        wroteArtifact: result.wroteArtifact,
         reviewStatus: result.review.status,
         reviewSummary: result.review.summary,
       },
@@ -226,7 +232,8 @@ function isSupportedAuthCommand(
 function printUsage(): void {
   console.log('Usage: bun run src/index.ts auth <login|api-key|status> <provider>')
   console.log('Usage: bun run src/index.ts prompt <message>')
-  console.log('Usage: bun run src/index.ts goal new <goal>')
+  console.log('Default goal preview target: tests/sandbox/web-docs/content/...')
+  console.log('Usage: bun run src/index.ts goal new [--write-docs] <goal>')
   console.log('Usage: bun run src/index.ts status show')
   console.log('Usage: bun run src/index.ts review latest')
 }

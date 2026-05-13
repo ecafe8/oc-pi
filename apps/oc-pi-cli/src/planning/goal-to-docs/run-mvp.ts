@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname } from 'node:path'
 
 import {
   createGoalToDocsRunSkeleton,
@@ -17,6 +17,12 @@ import {
   DEFAULT_SLOT_DEFINITIONS,
   createDefaultWorkbenchState,
 } from '@/runtime/default-config.js'
+import {
+  assertWithinTestSandbox,
+  assertWithinWorkspaceDocs,
+  resolveTestSandboxPath,
+  resolveWorkspacePath,
+} from '@/runtime/paths.js'
 import type { ReviewFinding, ReviewResult } from '@/shared/types/review.js'
 import {
   applyReviewToWorkbench,
@@ -33,7 +39,7 @@ import type { WorkbenchState } from '@/workbench/types.js'
 export interface RunGoalToDocsMvpInput {
   goal: string
   cliRoot: string
-  workspaceRoot: string
+  writeArtifacts?: boolean
 }
 
 export interface RunGoalToDocsMvpResult {
@@ -41,6 +47,8 @@ export interface RunGoalToDocsMvpResult {
   run: ReturnType<typeof executeGoalToDocsStage>['run']
   review: ReviewResult
   artifactPath: string
+  artifactAbsolutePath: string
+  wroteArtifact: boolean
 }
 
 export async function runGoalToDocsMvp(
@@ -49,6 +57,7 @@ export async function runGoalToDocsMvp(
   const loginBridge = new PiOAuthLoginBridge()
   const agentBridge = new PiModelAgentBridge()
   const credentialStore = new FileOAuthCredentialStore()
+  const shouldWriteArtifacts = input.writeArtifacts ?? false
   const initialState = createDefaultWorkbenchState(input.cliRoot)
   const goalResult = handleGoalNew({
     state: initialState,
@@ -112,7 +121,13 @@ export async function runGoalToDocsMvp(
     throw new Error(`Missing default slot path for ${stage.primaryOutputSlot}`)
   }
 
-  await writeArtifact(join(input.workspaceRoot, artifactPath), artifactMarkdown.text)
+  const artifactAbsolutePath = shouldWriteArtifacts
+    ? assertWithinWorkspaceDocs(resolveWorkspacePath(artifactPath))
+    : assertWithinTestSandbox(resolvePreviewArtifactPath(artifactPath))
+
+  if (shouldWriteArtifacts) {
+    await writeArtifact(artifactAbsolutePath, artifactMarkdown.text)
+  }
 
   const review = await reviewGoalArtifact({
     cliRoot: input.cliRoot,
@@ -146,8 +161,10 @@ export async function runGoalToDocsMvp(
       'success',
     ),
     {
-      type: 'write-result',
-      summary: `Wrote ${stage.primaryOutputSlot} to ${artifactPath}`,
+      type: shouldWriteArtifacts ? 'write-result' : 'system-summary',
+      summary: shouldWriteArtifacts
+        ? `Wrote ${stage.primaryOutputSlot} to ${artifactPath}`
+        : `Previewed ${stage.primaryOutputSlot} at ${artifactPath}`,
       createdAt: new Date().toISOString(),
     },
   )
@@ -157,6 +174,8 @@ export async function runGoalToDocsMvp(
     run: executed.run,
     review: executed.review,
     artifactPath,
+    artifactAbsolutePath,
+    wroteArtifact: shouldWriteArtifacts,
   }
 }
 
@@ -241,4 +260,12 @@ function buildReviewPrompt(goal: string, artifactMarkdown: string): string {
 
 function ensureTrailingNewline(value: string): string {
   return value.endsWith('\n') ? value : `${value}\n`
+}
+
+function resolvePreviewArtifactPath(artifactPath: string): string {
+  const previewRelativePath = artifactPath.startsWith('apps/')
+    ? artifactPath.slice('apps/'.length)
+    : artifactPath
+
+  return resolveTestSandboxPath(previewRelativePath)
 }
