@@ -58,6 +58,7 @@ apps/oc-pi-cli/src/
   review/
   routing/
   workbench/
+  provider-adapters/
   integrations/
   codegen/
   shared/
@@ -130,6 +131,31 @@ apps/oc-pi-cli/src/
 - TUI 视图装配
 - 命令入口与状态反馈视图
 
+建议第一版内部再按以下子域组织：
+
+```text
+workbench/
+  controller/
+  state/
+  commands/
+  views/
+  presenters/
+```
+
+- `controller 控制层`: 协调工作台输入事件与领域模块调用
+- `state 状态层`: 聚合工作台会话状态、检查面板状态、审查状态、状态栏状态
+- `commands 命令层`: 承载显式命令注册与执行
+- `views 视图层`: 承载 TUI 组件与布局装配
+- `presenters 展示适配层`: 将领域结果转换为稳定视图模型
+
+### provider-adapters 提供商适配层
+
+- 逻辑 `provider 提供商` / `model 模型` 名称到真实 SDK 标识的映射
+- 统一不同 `AI Provider 人工智能提供商` 的调用入口
+- 为 `roles 角色层` 与 `runtime 运行时编排层` 提供稳定执行接口
+
+说明：如果第一阶段不想新增顶层目录，也可以先把 `provider-adapters 提供商适配层` 放入 `integrations 集成层` 或 `config 配置层`，但职责需要保持独立。
+
 ### integrations 集成层
 
 - MCP bridge MCP 桥接
@@ -166,12 +192,22 @@ runtime
   -> review
   -> routing
   -> workbench
+  -> provider-adapters
   -> integrations
   -> codegen
 
-planning / docs / roles / review / routing / workbench / integrations / codegen
+planning / docs / roles / review / routing / workbench / provider-adapters / integrations / codegen
   -> shared
   -> config
+
+roles
+  -> provider-adapters
+
+workbench
+  -> roles
+  -> review
+  -> routing
+  -> conversation
 ```
 
 ## First Phase Priority 第一阶段优先级
@@ -185,6 +221,7 @@ planning / docs / roles / review / routing / workbench / integrations / codegen
 - `review 审查层`
 - `routing 路由层`
 - `workbench 工作台层`
+- `provider-adapters 提供商适配层`
 
 ### Can Stay Thin Early 早期可保持轻量
 

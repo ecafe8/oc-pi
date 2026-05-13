@@ -32,3 +32,20 @@ User Intent 用户意图
 - 进度摘要
 - 代码草案
 - loop 结果
+
+## Workbench Runtime Slice 工作台运行时切片
+
+Workbench Runtime Slice 工作台运行时切片用于说明 `interactive-workbench 交互工作台` 在整体运行时中的位置。
+
+```text
+User Intent 用户意图
+  -> Workbench Input 工作台输入
+  -> Runtime Dispatch 运行时分发
+  -> Planning / Review / Routing / Roles 模块执行
+  -> Workbench State Update 工作台状态更新
+  -> TUI Refresh 终端界面刷新
+```
+
+- 工作台不是独立业务引擎，而是运行时主循环的可视化入口
+- 工作台状态需要消费 `roles 角色层`、`review 审查层`、`routing 路由层` 的结构化结果
+- 这样可以保证命令模式与自然语言模式共享同一套底层执行链路
