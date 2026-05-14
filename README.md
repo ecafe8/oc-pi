@@ -1,120 +1,113 @@
-# Octopus Monorepo
-## What's inside?
+# oc-pi
 
-This Turborepo includes the following packages/apps:
+`oc-pi` 是一个基于 Bun workspaces + Turborepo 的 monorepo，当前主要包含两个核心应用：
 
-### Apps and Packages
+- `apps/oc-pi-cli`：产品主运行时，负责 CLI、goal-to-docs、review-loop、workbench 等能力实现。
+- `apps/web-docs`：当前产品规划与文档控制平面，用来组织 `apps/oc-pi-cli` 的愿景、能力、架构和任务，不是最终用户项目模板。
 
-- `@repo/web-template`: [Next.js](https://nextjs.org/) app
-- `@repo/share-ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/share-frontend`: a stub frontend utility library shared by both `web` and `docs` applications
-- `@repo/biome-config`: `biome` configurations
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
+## Requirements
 
-### Shared Type Import Rule
+- Node `>=22.18.0`
+- Bun `>=1.3.4`
 
-- RPC 类型通过 `@repo/server-template-exports/rpc` 使用。
-- 共享模块类型通过 `import type` 从 `@repo/server-template/modules/*/types` 直接导入。
-- 不再维护 `apps/server-template/exports/types.ts`。
+## Install
 
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
-
-### Utilities
-
-This Turborepo has some additional tools already setup for you:
-
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [Biome](https://biomejs.dev/) for code linting and formatting
-
-
-### Dev
-
-```
-bun i
-```
-To start a development server for all apps, run the following command:
-
-```
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo dev
+```bash
+bun install
 ```
 
-Or, if you prefer to use `bun` directly, you can run:
-```
-cd apps/test-web
-bun dev
-```
+## Workspace Commands
 
-### Build
+根目录只提供这几个聚合脚本：
 
-To build all apps and packages, run the following command:
-
-# With [global `turbo`](https://turborepo.com/docs/getting-started/installation#global-installation) installed (recommended)
-turbo build
-
-
-## Best Practices
-
-### Structure
-
-[](https://gemini.google.com/app/f8694eb84b83f80b)
-
-```plaintext
-packages/tools/
-├── src/
-│   ├── index.ts              # 聚合所有工具，导出 toolRegistry
-│   ├── tool-a/               # 工具 A 的完整世界
-│   │   ├── schema.ts         # 定义
-│   │   ├── implementation.ts # 逻辑
-│   │   ├── utils.ts          # 该工具私有的辅助函数
-│   │   └── index.ts          # 对外暴露该工具的组合体
-│   ├── tool-b/               # 工具 B
-│   │   ├── schema.ts
-│   │   ├── implementation.ts
-│   │   └── index.ts
-│   └── common/               # 多个工具通用的基类或工具
-└── package.json
+```bash
+bun run dev
+bun run build
+bun run lint
 ```
 
-```typescript
-// packages/tools/src/index.ts
-import { SearchSchema } from "./schema";
-import { searchHandler } from "./implementation";
+这个仓库没有根级 `test` 脚本；需要按应用执行针对性的校验命令。
 
-// 导出这个工具的“完整描述符”
-export const searchTool = {
-  name: "search",
-  description: "执行网页搜索",
-  schema: SearchSchema,
-  execute: searchHandler
-};
+## Main Apps
 
-// 导出类型供其他 package 使用
-export type { SearchInput } from "./schema";
+### `apps/oc-pi-cli`
+
+CLI 入口在 `apps/oc-pi-cli/src/index.ts`。
+
+常用命令：
+
+```bash
+bun --filter oc-pi-cli run dev
+bun --filter oc-pi-cli run types:check
 ```
 
-```typescript
-// packages/tools/src/tool-a/schema.ts
-import { z } from "zod";
-// 定义工具 A 的输入输出结构
-export const ToolASchema = z.object({
-  query: z.string().min(1, "Query cannot be empty")
-});
-export type ToolAInput = z.infer<typeof ToolASchema>;
+当前 CLI 支持的主要命令族包括：
+
+- `auth`
+- `prompt`
+- `goal`
+- `status`
+- `review`
+
+其中：
+
+- `goal new <目标>` 默认是 preview 模式，产物写到 `tests/sandbox`
+- `goal new <目标> --write-docs` 才会把真实文档写入 `apps/web-docs`
+- 真实写入路径会被 `apps/oc-pi-cli/src/runtime/paths.ts` 限制在 `apps/web-docs` 内
+
+### `apps/web-docs`
+
+`apps/web-docs` 是 Next.js 16 + Fumadocs 应用，文档内容真源在 `apps/web-docs/content/docs`。
+
+常用命令：
+
+```bash
+bun --filter web-docs run dev
+bun --filter web-docs run lint
+bun --filter web-docs run types:check
+bun --filter web-docs run build
 ```
 
-```typescript
-// packages/tools/src/index.ts
-import { ToolASchema } from "./tool-a/schema";
-import { ToolBSchema } from "./tool-b/schema";
+补充说明：
 
-// 聚合所有工具的 schema
-export const toolRegistry = {
-  toolA: ToolASchema,
-  toolB: ToolBSchema
-};
+- 开发服务端口固定为 `4124`
+- Fumadocs 内容目录在 `apps/web-docs/source.config.ts` 中硬编码为 `content/docs`
+- 首页仅做 `/docs` 重定向
+- `apps/web-docs/.source/` 为生成目录，不应手动编辑
 
-export type AvailableTools = typeof allTools[number]["name"];
-```
+## Docs Control Plane
 
+当前项目文档集中在 `apps/web-docs/content/docs`，用于收敛 `apps/oc-pi-cli` 的产品目标和实现路线。
 
+目录角色以 `apps/web-docs/content/docs/planning/docs-structure-and-output-spec.md` 为准：
+
+- `product/`：愿景、路线图、里程碑、全局状态
+- `capabilities/`：能力地图与边界
+- `architecture/`：运行时模型、系统结构、模块边界
+- `planning/`：规则、协议、功能规划
+- `tasks/`：backlog、in-progress、next-up、执行任务
+- `references/`：外部参考，不直接驱动实现
+- `protocols/`：横切文档规则
+- `archive/`：历史上下文
+
+新增文档前，优先更新现有真源页，而不是平行创建新文件。
+
+## Docs Writing Rules
+
+对 `apps/web-docs/content` 下文档，当前仓库要求：
+
+- 第一次出现的英文术语必须附带中文解释
+- 关系名称使用 `English + 中文语义`
+- 字段名称附带中文定义
+- 技术术语标题所在章节的第一句先用中文解释
+- `foundation` 或 `product` 层文档不要留下未解释的纯英文术语
+
+规范真源文件：`apps/web-docs/content/docs/protocols/docs-writing-rule.md`
+
+## Verification Guidance
+
+如果改动的是：
+
+- CLI 运行时：至少执行 `bun --filter oc-pi-cli run types:check`
+- 文档站或文档内容：至少执行 `bun --filter web-docs run lint`，必要时再跑 `bun --filter web-docs run types:check`
+- 跨应用改动：按影响范围分别验证，不要假设根命令会覆盖全部问题
