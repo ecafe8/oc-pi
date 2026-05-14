@@ -3,7 +3,10 @@ import {
   PiModelAgentBridge,
   PiOAuthLoginBridge,
 } from '@/provider-adapters/index.js'
-import { runGoalToDocsMvp } from '@/planning/goal-to-docs/run-mvp.js'
+import {
+  type ArtifactMode,
+  runGoalToDocsMvp,
+} from '@/planning/goal-to-docs/run-mvp.js'
 import { createDefaultWorkbenchState } from '@/runtime/default-config.js'
 import { getCliRootPath } from '@/runtime/paths.js'
 import { FileRuntimeSessionStore } from '@/runtime/session-store.js'
@@ -145,8 +148,17 @@ async function runPromptCommand(args: string[]): Promise<void> {
 }
 
 async function runGoalCommand(args: string[]): Promise<void> {
-  const writeArtifacts = args.includes('--write-docs')
-  const filteredArgs = args.filter((arg) => arg !== '--write-docs')
+  const writesDocs = args.includes('--write-docs')
+  const writesSandbox = args.includes('--write-sandbox')
+
+  if (writesDocs && writesSandbox) {
+    throw new Error('Conflicting goal write flags. Use either --write-docs or --write-sandbox')
+  }
+
+  const artifactMode = resolveArtifactMode({ writesDocs, writesSandbox })
+  const filteredArgs = args.filter(
+    (arg) => arg !== '--write-docs' && arg !== '--write-sandbox',
+  )
   const [command, ...goalParts] = filteredArgs
 
   if (command !== 'new') {
@@ -163,10 +175,10 @@ async function runGoalCommand(args: string[]): Promise<void> {
   const result = await runGoalToDocsMvp({
     goal,
     cliRoot,
-    writeArtifacts,
+    artifactMode,
   })
 
-  if (writeArtifacts) {
+  if (artifactMode === 'write') {
     await sessionStore.write({
       workbenchState: result.workbenchState,
       latestRun: result.run,
@@ -177,7 +189,7 @@ async function runGoalCommand(args: string[]): Promise<void> {
     JSON.stringify(
       {
         command: 'goal.new',
-        mode: writeArtifacts ? 'write' : 'preview',
+        mode: artifactMode,
         acceptedGoal: goal,
         stages: result.stages.map((stage) => ({
           stageId: stage.stageId,
@@ -237,10 +249,27 @@ function isSupportedAuthCommand(
 function printUsage(): void {
   console.log('Usage: bun run src/index.ts auth <login|api-key|status> <provider>')
   console.log('Usage: bun run src/index.ts prompt <message>')
-  console.log('Default goal preview target: tests/sandbox/web-docs/content/...')
-  console.log('Usage: bun run src/index.ts goal new [--write-docs] <goal>')
+  console.log('Default goal preview target: tests/sandbox/web-docs/content/... (no files written)')
+  console.log('Sandbox goal write target: tests/sandbox/web-docs/content/... (--write-sandbox)')
+  console.log('Real goal write target: apps/web-docs/content/docs/... (--write-docs)')
+  console.log('Usage: bun run src/index.ts goal new [--write-sandbox|--write-docs] <goal>')
   console.log('Usage: bun run src/index.ts status show')
   console.log('Usage: bun run src/index.ts review latest')
+}
+
+function resolveArtifactMode(input: {
+  writesDocs: boolean
+  writesSandbox: boolean
+}): ArtifactMode {
+  if (input.writesDocs) {
+    return 'write'
+  }
+
+  if (input.writesSandbox) {
+    return 'sandbox-write'
+  }
+
+  return 'preview'
 }
 
 void main().catch((error: unknown) => {

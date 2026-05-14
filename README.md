@@ -51,9 +51,20 @@ bun --filter oc-pi-cli run types:check
 
 其中：
 
-- `goal new <目标>` 默认是 preview 模式，产物写到 `tests/sandbox`
-- `goal new <目标> --write-docs` 才会把真实文档写入 `apps/web-docs`
+- `goal new <目标>` 是 preview 模式，只预览目标路径，不写文件；解析路径指向 `tests/sandbox`
+- `goal new --write-sandbox <目标>` 会把产物真实写入 `tests/sandbox/web-docs/content/...`，用于验证完整写盘流程但不触碰真实 docs
+- `goal new --write-docs <目标>` 才会把真实文档写入 `apps/web-docs/content/docs/...`
+- `--write-sandbox` 与 `--write-docs` 不能同时使用
 - 真实写入路径会被 `apps/oc-pi-cli/src/runtime/paths.ts` 限制在 `apps/web-docs` 内
+- 只有真实 `--write-docs` 会持久化 `.oc-pi-cli/session.json`；preview 与 sandbox write 不会写 runtime session
+
+示例：
+
+```bash
+bun run src/index.ts goal new "两阶段 preview 仅预览路径"
+bun run src/index.ts goal new --write-sandbox "两阶段写入 sandbox 验证完整流程"
+bun run src/index.ts goal new --write-docs "两阶段真实写入 docs"
+```
 
 ### `apps/web-docs`
 

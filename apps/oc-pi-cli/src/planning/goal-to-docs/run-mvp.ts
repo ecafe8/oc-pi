@@ -42,7 +42,7 @@ import type { WorkbenchState } from '@/workbench/types.js'
 export interface RunGoalToDocsMvpInput {
   goal: string
   cliRoot: string
-  writeArtifacts?: boolean
+  artifactMode?: ArtifactMode
 }
 
 export interface RunGoalToDocsMvpResult {
@@ -52,6 +52,8 @@ export interface RunGoalToDocsMvpResult {
   stages: GoalStageExecutionResult[]
   wroteArtifact: boolean
 }
+
+export type ArtifactMode = 'preview' | 'sandbox-write' | 'write'
 
 interface GoalStageExecutionResult {
   stageId: GoalToDocsStageContract['stageId']
@@ -68,7 +70,8 @@ export async function runGoalToDocsMvp(
   const agentBridge = new PiModelAgentBridge()
   const credentialStore = new FileOAuthCredentialStore()
   const apiKeyCache = new Map<string, string>()
-  const shouldWriteArtifacts = input.writeArtifacts ?? false
+  const artifactMode = input.artifactMode ?? 'preview'
+  const shouldWriteArtifacts = artifactMode !== 'preview'
   const initialState = createDefaultWorkbenchState(input.cliRoot)
   const goalResult = handleGoalNew({
     state: initialState,
@@ -115,6 +118,7 @@ export async function runGoalToDocsMvp(
     modelId: writerModel.resolvedModelId,
     apiKey: firstStageWriterApiKey,
     shouldWriteArtifacts,
+    artifactMode,
     agentBridge,
     reviewerRole,
     reviewerApiKey: await resolveProviderApiKey({
@@ -130,7 +134,7 @@ export async function runGoalToDocsMvp(
       state: goalResult.state,
       run: firstStageResult.run,
       review: firstStageResult.review,
-      timelineSummary: buildTimelineSummary(firstStageResult, shouldWriteArtifacts),
+      timelineSummary: buildTimelineSummary(firstStageResult, artifactMode),
     })
 
     return {
@@ -201,6 +205,7 @@ export async function runGoalToDocsMvp(
       apiKeyCache,
     }),
     shouldWriteArtifacts,
+    artifactMode,
     agentBridge,
     reviewerRole: secondStageReviewerRole,
     reviewerApiKey: await resolveProviderApiKey({
@@ -215,7 +220,7 @@ export async function runGoalToDocsMvp(
     state: goalResult.state,
     run: secondStageResult.run,
     review: secondStageResult.review,
-    timelineSummary: buildTimelineSummary(secondStageResult, shouldWriteArtifacts),
+    timelineSummary: buildTimelineSummary(secondStageResult, artifactMode),
   })
 
   return {
@@ -237,6 +242,7 @@ interface ExecuteStageInput {
   modelId: string
   apiKey: string
   shouldWriteArtifacts: boolean
+  artifactMode: ArtifactMode
   agentBridge: PiModelAgentBridge
   reviewerRole: typeof DEFAULT_ROLE_CONFIGS[number]
   reviewerApiKey: string
@@ -259,17 +265,21 @@ async function executeStage(input: ExecuteStageInput): Promise<ExecuteStageOutpu
   const logicalArtifactPath = resolveLogicalArtifactPath(input.stage.primaryOutputSlot)
   const resolvedArtifactAbsolutePath = resolveArtifactAbsolutePath({
     logicalArtifactPath,
-    shouldWriteArtifacts: input.shouldWriteArtifacts,
+    artifactMode: input.artifactMode,
+  })
+  const normalizedArtifactText = normalizeArtifactDocument({
+    logicalArtifactPath,
+    content: artifactResponse.text,
   })
 
   if (input.shouldWriteArtifacts) {
-    await writeArtifact(resolvedArtifactAbsolutePath, artifactResponse.text)
+    await writeArtifact(resolvedArtifactAbsolutePath, normalizedArtifactText)
   }
 
   const review = await reviewGoalArtifact({
     cliRoot: input.cliRoot,
     goal: input.goal,
-    artifactMarkdown: artifactResponse.text,
+    artifactMarkdown: normalizedArtifactText,
     apiKey: input.reviewerApiKey,
     provider: input.reviewerRole.provider,
     modelId: resolveProviderModelForRole(input.reviewerRole).resolvedModelId,
@@ -279,7 +289,7 @@ async function executeStage(input: ExecuteStageInput): Promise<ExecuteStageOutpu
     reviewPrompt: buildStageReviewPrompt({
       goal: input.goal,
       stage: input.stage,
-      artifactMarkdown: artifactResponse.text,
+      artifactMarkdown: normalizedArtifactText,
     }),
   })
 
@@ -300,7 +310,7 @@ async function executeStage(input: ExecuteStageInput): Promise<ExecuteStageOutpu
       stageId: input.stage.stageId,
       logicalArtifactPath,
       resolvedArtifactAbsolutePath,
-      artifactText: artifactResponse.text,
+      artifactText: normalizedArtifactText,
       review: executed.review,
     },
   }
@@ -368,11 +378,14 @@ function buildGoalFramingPrompt(goal: string): string {
     '输出必须是 Markdown，并直接给出完整文档内容。',
     '必须遵守这些规则：',
     '- 文档路径目标是 apps/web-docs/content/docs/product/vision.md。',
+    '- 必须保留 YAML front matter，且只包含 title 与 description 两个字段。',
     '- 首次出现的英文术语必须带中文解释。',
     '- 如果章节标题是技术术语，章节第一句话必须用中文解释。',
     '- 不要留下只有英文没有中文解释的术语。',
     '- 内容要围绕当前用户目标，保持简洁、具体、可执行。',
-    '- 保留 frontmatter，title 使用 Product Vision 产品愿景。',
+    '- front matter 中 title 必须是 Product Vision 产品愿景。',
+    '- front matter 中 description 必须是 说明 apps/oc-pi-cli 要解决什么问题、服务什么场景、形成什么产品能力。',
+    '- 正文一级标题必须是 # Product Vision 产品愿景。',
     '- 至少包含 Vision 愿景、Product Positioning 产品定位、Current Product Goal 当前产品目标、MVP Scope 第一阶段最小范围。',
     '',
     `用户目标: ${goal}`,
@@ -425,6 +438,68 @@ function ensureTrailingNewline(value: string): string {
   return value.endsWith('\n') ? value : `${value}\n`
 }
 
+function normalizeArtifactDocument(input: {
+  logicalArtifactPath: string
+  content: string
+}): string {
+  if (input.logicalArtifactPath === 'apps/web-docs/content/docs/product/vision.md') {
+    return normalizeDocumentFrontMatter({
+      content: input.content,
+      title: 'Product Vision 产品愿景',
+      description: '说明 apps/oc-pi-cli 要解决什么问题、服务什么场景、形成什么产品能力',
+      heading: '# Product Vision 产品愿景',
+    })
+  }
+
+  if (input.logicalArtifactPath === 'apps/web-docs/content/docs/capabilities/overview.mdx') {
+    return normalizeDocumentFrontMatter({
+      content: input.content,
+      title: 'Capabilities Overview 能力总览',
+      description: 'apps/oc-pi-cli 的一级能力地图与能力边界概览',
+      heading: '# Capabilities Overview 能力总览',
+    })
+  }
+
+  return ensureTrailingNewline(input.content)
+}
+
+function normalizeDocumentFrontMatter(input: {
+  content: string
+  title: string
+  description: string
+  heading: string
+}): string {
+  const withoutFrontMatter = stripLeadingFrontMatter(input.content).trimStart()
+  const withoutHeading = withoutFrontMatter.startsWith(`${input.heading}\n`)
+    ? withoutFrontMatter.slice(input.heading.length).trimStart()
+    : withoutFrontMatter
+
+  return ensureTrailingNewline([
+    '---',
+    `title: ${input.title}`,
+    `description: ${input.description}`,
+    '---',
+    '',
+    input.heading,
+    '',
+    withoutHeading,
+  ].join('\n'))
+}
+
+function stripLeadingFrontMatter(content: string): string {
+  if (!content.startsWith('---\n')) {
+    return content
+  }
+
+  const endIndex = content.indexOf('\n---\n', 4)
+
+  if (endIndex === -1) {
+    return content
+  }
+
+  return content.slice(endIndex + '\n---\n'.length)
+}
+
 function resolvePreviewArtifactPath(artifactPath: string): string {
   const previewRelativePath = artifactPath.startsWith('apps/')
     ? artifactPath.slice('apps/'.length)
@@ -447,11 +522,13 @@ function resolveLogicalArtifactPath(slotId: SlotId): string {
 
 function resolveArtifactAbsolutePath(input: {
   logicalArtifactPath: string
-  shouldWriteArtifacts: boolean
+  artifactMode: ArtifactMode
 }): string {
-  return input.shouldWriteArtifacts
-    ? assertWithinWorkspaceDocs(resolveWorkspacePath(input.logicalArtifactPath))
-    : assertWithinTestSandbox(resolvePreviewArtifactPath(input.logicalArtifactPath))
+  if (input.artifactMode === 'write') {
+    return assertWithinWorkspaceDocs(resolveWorkspacePath(input.logicalArtifactPath))
+  }
+
+  return assertWithinTestSandbox(resolvePreviewArtifactPath(input.logicalArtifactPath))
 }
 
 function resolveStageInputArtifact(input: {
@@ -482,9 +559,13 @@ function buildCapabilityBreakdownPrompt(input: {
     '输出必须是 Markdown，并直接给出完整文档内容。',
     '必须遵守这些规则：',
     '- 文档路径目标是 apps/web-docs/content/docs/capabilities/overview.mdx。',
+    '- 必须保留 YAML front matter，且只包含 title 与 description 两个字段。',
+    '- front matter 中 title 必须是 Capabilities Overview 能力总览。',
+    '- front matter 中 description 必须是 apps/oc-pi-cli 的一级能力地图与能力边界概览。',
     '- 首次出现的英文术语必须带中文解释。',
     '- 如果章节标题是技术术语，章节第一句话必须用中文解释。',
     '- 不要留下只有英文没有中文解释的术语。',
+    '- 正文一级标题必须是 # Capabilities Overview 能力总览。',
     '- 内容要从产品目标草案中拆出一级能力模块、边界、关键约束和主要风险。',
     '- 至少包含 Capability Domains 能力域、Capability Boundaries 能力边界、Open Risks 待定风险。',
     '',
@@ -497,11 +578,17 @@ function buildCapabilityBreakdownPrompt(input: {
 
 function buildTimelineSummary(
   stageResult: ExecuteStageOutput,
-  wroteArtifact: boolean,
+  artifactMode: ArtifactMode,
 ): string {
-  return wroteArtifact
-    ? `Wrote ${stageResult.review.artifactSlotId} to ${stageResult.stageResult.logicalArtifactPath}`
-    : `Previewed ${stageResult.review.artifactSlotId} at ${stageResult.stageResult.logicalArtifactPath}`
+  if (artifactMode === 'write') {
+    return `Wrote ${stageResult.review.artifactSlotId} to ${stageResult.stageResult.logicalArtifactPath}`
+  }
+
+  if (artifactMode === 'sandbox-write') {
+    return `Wrote sandbox ${stageResult.review.artifactSlotId} to ${stageResult.stageResult.logicalArtifactPath}`
+  }
+
+  return `Previewed ${stageResult.review.artifactSlotId} at ${stageResult.stageResult.logicalArtifactPath}`
 }
 
 function finalizeWorkbenchState(input: {
