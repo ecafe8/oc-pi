@@ -49,7 +49,7 @@
 
 ### Decision 2: 第二阶段输入必须读取第一阶段产物内容，而不是只传逻辑路径或 run summary
 
-采纳方案：`capability-breakdown 能力拆解` 的 writer prompt 必须读取第一阶段生成的 `product-goal 产品目标槽位` 实际文档内容，并将其作为结构化输入上下文的一部分提供给模型。
+采纳方案：`capability-breakdown 能力拆解` 的 writer prompt 必须读取第一阶段生成的 `product-goal 产品目标槽位` 实际文档内容，并将其作为结构化输入上下文的一部分提供给模型。为了兼容 preview 模式不落盘的安全策略，系统在 preview 模式下 MUST 直接以内存中的第一阶段产物文本传递给第二阶段；在 `--write-docs` 模式下可以复用同一份内存文本，也可以在需要时从已写入路径读取，但实现不得把“必须先落盘才能进入第二阶段”当成前提。
 
 理由：
 - `goal-to-docs 目标到文档` 文档已经明确第二阶段输入是“已审过的目标草案”，而不是抽象的阶段状态。
@@ -61,7 +61,22 @@
 备选方案 B：把第一阶段结果只以 JSON 摘要形式存到 session，再从 session 读取。
 - 不采纳原因：会引入“文档产物”和“会话摘要”两套事实源，增加不一致风险。
 
-### Decision 3: preview 与 write 两条路径继续复用同一逻辑路径，但解析到不同物理目标
+### Decision 3: `goal-planner 目标规划者` 继续复用到前两阶段，阶段 `primaryOutputSlot 主输出槽位` 作为运行时真实输出绑定
+
+采纳方案：保持 `goal-planner 目标规划者` 作为前两阶段的 writer，不在本 change 中新增 `capability-planner 能力规划者`。运行时以每个阶段的 `primaryOutputSlot 主输出槽位` 作为真实输出绑定来源，而 `RoleConfig.outputTarget 输出目标` 继续视为角色的默认主槽位，不要求它覆盖角色所参与的每一个阶段输出。
+
+理由：
+- `goal-to-docs 目标到文档` 文档已经明确 `goal-planner 目标规划者` 同时负责 `goal-framing 目标定型` 与 `capability-breakdown 能力拆解`。
+- 如果为了第二阶段单独新增角色，会扩大当前 change 范围，并引入新的角色语义收敛问题。
+- 现有协议中，`Stage Contract 阶段契约` 的 `primaryOutputSlot 主输出槽位` 本来就是阶段级输出真源，适合覆盖角色默认值。
+
+备选方案 A：新增 `capability-planner 能力规划者` 角色。
+- 不采纳原因：会扩大角色模型变更范围，并迫使 `agent-role-config 角色配置`、`RoleId 角色标识`、默认配置与 workbench 切换逻辑同时调整。
+
+备选方案 B：强制要求 `RoleConfig.outputTarget 输出目标` 与角色参与的所有阶段输出完全一致。
+- 不采纳原因：与当前 planning 文档不一致，也会让单角色复用到多阶段的能力明显变差。
+
+### Decision 4: preview 与 write 两条路径继续复用同一逻辑路径，但解析到不同物理目标
 
 采纳方案：
 - `logicalArtifactPath 逻辑路径` 继续保持 `apps/web-docs/...`
@@ -79,7 +94,21 @@
 备选方案 B：preview 模式完全不返回逻辑路径，只返回 sandbox 路径。
 - 不采纳原因：会丢失“逻辑槽位最终归属”的协议信息，不利于后续 write 模式切换与 workbench 展示。
 
-### Decision 4: Workbench 保持“当前阶段 + 最近审查结果”视图，但新增两阶段 run 摘要能力
+### Decision 5: Review 结果与 CLI 返回结构必须按阶段参数化，而不是复用第一阶段硬编码结果
+
+采纳方案：`review` 的结构化结果必须由当前阶段输入参数决定，包括 `artifactSlotId 产物槽位标识`、`reviewerRoleId 审查角色标识` 和返回给 CLI 的阶段结果。`RunGoalToDocsMvpResult` 也必须从单阶段输出升级为可以表达两阶段运行结果的结构，而不是继续只返回单个 `review`、单个 `logicalArtifactPath` 与单个 `resolvedArtifactAbsolutePath`。
+
+理由：
+- 当前实现中 `parseReviewResponse()` 把 `artifactSlotId` 硬编码为 `product-goal`，这在第二阶段一定会产生错误绑定。
+- 两阶段闭环上线后，`index.ts`、`status show` 和 `review latest` 都需要消费更完整的阶段结果，单阶段返回结构不再足够。
+
+备选方案 A：保留单个 review 结构，只约定它始终代表“最后一个阶段”。
+- 不采纳原因：语义过于隐式，调试和验证时很难判断中间阶段信息是否丢失。
+
+备选方案 B：让 CLI 侧自己通过读取 session 还原第二阶段结果。
+- 不采纳原因：会把运行时结构责任推到消费端，增加状态分裂风险。
+
+### Decision 6: Workbench 保持“当前阶段 + 最近审查结果”视图，但新增两阶段 run 摘要能力
 
 采纳方案：保留当前 `status show` 的简化形态，不在本 change 中引入复杂 TUI，但在内部状态和 command 输出中允许展示两阶段 run 结果，例如：
 - 当前阶段是否推进到 `capability-breakdown 能力拆解`
@@ -99,8 +128,10 @@
 ## Risks / Trade-offs
 
 - [第二阶段 prompt 质量依赖第一阶段文档结构稳定性] → 通过在 prompt 中固定引用 `Product Goal Draft 产品目标草案` 的关键章节，并在 tasks 中要求补充最小快照测试缓解。
+- [preview 模式下如果错误依赖磁盘文件，会导致第二阶段无法消费第一阶段结果] → 明确规定 preview 模式走内存产物传递，并在 tasks 中单列实现与验证任务。
 - [preview 与 write 双路径逻辑可能产生状态展示混淆] → 继续明确区分 `logicalArtifactPath 逻辑路径` 与 `resolvedArtifactAbsolutePath 解析后的绝对路径`，并在 CLI 输出中同时展示。
 - [继续使用单模型作为 writer 与 reviewer 可能弱化角色差异] → 当前 change 只验证运行时闭环，角色能力差异延后到后续 provider/model 策略优化。
+- [`goal-planner 目标规划者` 的默认 `outputTarget 输出目标` 与第二阶段输出槽位不一致，可能让实现者误以为必须新建角色] → 以 `Stage Contract 阶段契约` 的 `primaryOutputSlot 主输出槽位` 为运行时真源，并在 design 与 tasks 中明确这一点。
 - [当前 review 仍是单轮审查，未覆盖自动修订] → 先把两阶段串通，自动修订循环保持后续增量实现。
 
 ## Compatibility
