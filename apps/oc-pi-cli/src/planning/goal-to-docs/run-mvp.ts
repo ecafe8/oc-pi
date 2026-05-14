@@ -46,8 +46,8 @@ export interface RunGoalToDocsMvpResult {
   workbenchState: WorkbenchState
   run: ReturnType<typeof executeGoalToDocsStage>['run']
   review: ReviewResult
-  artifactPath: string
-  artifactAbsolutePath: string
+  logicalArtifactPath: string
+  resolvedArtifactAbsolutePath: string
   wroteArtifact: boolean
 }
 
@@ -173,8 +173,8 @@ export async function runGoalToDocsMvp(
     workbenchState: finalState,
     run: executed.run,
     review: executed.review,
-    artifactPath,
-    artifactAbsolutePath,
+    logicalArtifactPath: artifactPath,
+    resolvedArtifactAbsolutePath: artifactAbsolutePath,
     wroteArtifact: shouldWriteArtifacts,
   }
 }
