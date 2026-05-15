@@ -20,7 +20,7 @@
 
 - [x] 4.1 保持 preview 模式只解析 `tests/sandbox/...` 路径、不写盘，但仍能完成第三阶段输入消费。
 - [x] 4.2 保持 `--write-sandbox` 将第三阶段文档写入 `tests/sandbox/web-docs/content/docs/planning/mvp-features.md`。
-- [ ] 4.3 保持 `--write-docs` 为唯一真实写入开关，并确保第三阶段真实写入继续受 `apps/web-docs/` 路径 guard 保护。
+- [x] 4.3 保持 `--write-docs` 为唯一真实写入开关，并确保第三阶段真实写入继续受 `apps/web-docs/` 路径 guard 保护。
 
 ## 5. 运行状态与工作台同步
 
@@ -33,5 +33,5 @@
 - [x] 6.1 执行 `bun run types:check`，确认第三阶段扩展后的类型检查通过。
 - [x] 6.2 执行 `bun run src/index.ts goal new "<goal>"`，验证默认 preview 模式下第三阶段能消费第二阶段内存产物，并返回第三阶段路径与槽位信息。
 - [x] 6.3 执行 `bun run src/index.ts goal new --write-sandbox "<goal>"`，验证第三阶段共享物理文档写入 `tests/sandbox/.../planning/mvp-features.md`。
-- [ ] 6.4 执行 `bun run src/index.ts status show` 与 `bun run src/index.ts review latest`，确认第三阶段状态与最近审查结果可以被观察。
+- [x] 6.4 执行 `bun run src/index.ts status show` 与 `bun run src/index.ts review latest`，确认第三阶段状态与最近审查结果可以被观察。
 - [x] 6.5 对照并在实现说明中引用以下文档，确保行为与规划协议一致：`development-plan-framework.md`、`goal-to-docs.md`、`output-target-slots.md`、`agent-role-config.md`、`docs-structure-and-output-spec.md`。
