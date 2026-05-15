@@ -1022,6 +1022,8 @@ function buildArtifactReviewPrompt(input: {
       '请审查下面的 MVP Features MVP 功能清单草案。',
       '必须重点检查：front matter 是否只包含固定的 title 与 description，H1 是否正确，是否同时包含 Feature List 功能清单、MVP Scope MVP 范围、Prioritization Rule 优先级规则、Open Questions 待定问题。',
       '重要说明：该文档按当前协议本来就需要同时承载 feature-plan 功能规划槽位 与 mvp-scope MVP 范围槽位；只要 Feature List 与 MVP Scope 两个分区都清晰存在，就不能因为“双槽位共用一个文档”本身而判为问题。',
+      '如果文档已经满足固定结构，即使条目内容较短或偏简洁，也应判为 accepted，不要因为还可以继续扩写就要求修改。',
+      '如果文档在结构上合格，但写成了总结、复盘、泛化建议清单或模板外说明，应返回 changes-requested。',
       '只允许输出以下纯文本格式：',
       'STATUS: accepted 或 STATUS: changes-requested',
       'SUMMARY: 一句中文摘要',
@@ -1077,6 +1079,8 @@ function buildArtifactReviewPrompt(input: {
     '你是 goal-reviewer 目标审查者。',
     '请审查下面的 Capability Breakdown 能力拆解草案。',
     '必须重点检查：front matter 是否只包含 title 与 description，H1 是否正确，是否完整保留固定的五个二级标题，正文是否仍然是一级能力总览而不是其他文档类型。',
+    '如果文档已经满足固定结构，即使条目内容较短或偏简洁，也应判为 accepted，不要因为还可以继续扩写就要求修改。',
+    '如果文档在结构上合格，但写成了总结、前言、分析说明、问答或其他非能力地图文风，应返回 changes-requested。',
     '只允许输出以下纯文本格式：',
     'STATUS: accepted 或 STATUS: changes-requested',
     'SUMMARY: 一句中文摘要',
@@ -1230,6 +1234,13 @@ function validateCapabilitiesOverviewDocument(content: string): ArtifactValidati
     'description: apps/oc-pi-cli 的一级能力地图与能力边界概览',
   ])
 
+  if (!content.startsWith('---\n')) {
+    findings.push({
+      message: 'capabilities overview 必须从 front matter 起始，不能在模板前输出说明、前言或其他额外文本。',
+      severity: 'medium',
+    })
+  }
+
   if (frontMatterLines.length !== 2 || frontMatterLines.some((line) => !allowedFrontMatterLines.has(line))) {
     findings.push({
       message: 'capabilities overview front matter 必须且只能包含 title 与 description 两个固定字段。',
@@ -1280,6 +1291,13 @@ function validateMvpFeaturesDocument(content: string): ArtifactValidationResult 
     'title: MVP Features MVP 功能清单',
     'description: apps/oc-pi-cli 当前第一批核心功能与其作用边界定义',
   ])
+
+  if (!content.startsWith('---\n')) {
+    findings.push({
+      message: 'mvp features 必须从 front matter 起始，不能在模板前输出说明、前言或其他额外文本。',
+      severity: 'medium',
+    })
+  }
 
   if (frontMatterLines.length !== 2 || frontMatterLines.some((line) => !allowedFrontMatterLines.has(line))) {
     findings.push({
@@ -1332,6 +1350,13 @@ function validateHandoffSummaryDocument(content: string): ArtifactValidationResu
     'description: 汇总 apps/oc-pi-cli 当前规划闭环的确认结论与下一步交接信息',
   ])
 
+  if (!content.startsWith('---\n')) {
+    findings.push({
+      message: 'handoff summary 必须从 front matter 起始，不能在模板前输出说明、前言或其他额外文本。',
+      severity: 'medium',
+    })
+  }
+
   if (frontMatterLines.length !== 2 || frontMatterLines.some((line) => !allowedFrontMatterLines.has(line))) {
     findings.push({
       message: 'handoff summary front matter 必须且只能包含 title 与 description 两个固定字段。',
@@ -1381,6 +1406,13 @@ function validateHandoffNextUpDocument(content: string): ArtifactValidationResul
     'title: Handoff Next Up 下一步指引',
     'description: 基于 apps/oc-pi-cli 当前交接摘要提炼的动态下一步动作',
   ])
+
+  if (!content.startsWith('---\n')) {
+    findings.push({
+      message: 'handoff next up 必须从 front matter 起始，不能在模板前输出说明、前言或其他额外文本。',
+      severity: 'medium',
+    })
+  }
 
   if (frontMatterLines.length !== 2 || frontMatterLines.some((line) => !allowedFrontMatterLines.has(line))) {
     findings.push({
