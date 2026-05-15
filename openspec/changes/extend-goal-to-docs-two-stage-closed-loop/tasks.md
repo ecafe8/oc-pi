@@ -35,5 +35,5 @@
 - [x] 5.1 执行 `bun run types:check`，确认两阶段闭环改动后的 TypeScript 类型检查通过。
 - [x] 5.2 执行 `bun run src/index.ts goal new "<goal>"`，验证默认 preview 模式下第二阶段路径解析到 `tests/sandbox/`，且第二阶段能够在不落盘第一阶段产物的前提下完成输入消费。
 - [x] 5.3 执行 `bun run src/index.ts status show` 与 `bun run src/index.ts review latest`，确认两阶段状态、最近审查结果以及阶段槽位绑定都能够被观察。
-- [ ] 5.4 如需要验证真实写入，再执行 `bun run src/index.ts goal new --write-docs "<goal>"`，确认第二阶段写入仍然受真实 docs 路径 guard 保护。
+- [x] 5.4 如需要验证真实写入，再执行 `bun run src/index.ts goal new --write-docs "<goal>"`，确认第二阶段写入仍然受真实 docs 路径 guard 保护。
 - [x] 5.5 对照并在实现说明中引用以下文档，确保行为与规划协议一致：`development-plan-framework.md`、`goal-to-docs.md`、`output-target-slots.md`、`agent-role-config.md`。
