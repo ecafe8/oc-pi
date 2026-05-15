@@ -13,6 +13,11 @@ export interface PresentedWorkbenchState {
   inspector: {
     resolvedSlotId: string
     resolvedPath: string
+    additionalResolvedSlotIds: string[]
+    resolvedTargets: Array<{
+      slotId: string
+      path: string
+    }>
     lastExecutionStatus: string
     blockingIssues: string[]
   }
@@ -44,6 +49,8 @@ export function presentWorkbenchState(
     inspector: {
       resolvedSlotId: state.inspector.resolvedSlotId,
       resolvedPath: state.inspector.resolvedPath,
+      additionalResolvedSlotIds: state.inspector.additionalResolvedSlotIds,
+      resolvedTargets: state.inspector.resolvedTargets,
       lastExecutionStatus: state.inspector.lastExecutionStatus,
       blockingIssues: state.inspector.blockingIssues,
     },

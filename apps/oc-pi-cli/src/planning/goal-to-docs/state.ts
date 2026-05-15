@@ -14,8 +14,9 @@ export function createGoalToDocsStageRecord(
     stageId: stage.stageId,
     status: 'pending',
     primaryOutputSlot: stage.primaryOutputSlot,
-    additionalOutputSlots: stage.additionalOutputSlots,
+    additionalOutputSlots: stage.additionalOutputSlots ?? [],
     artifactPaths: [],
+    resolvedTargets: [],
     blockingIssues: [],
   }
 }

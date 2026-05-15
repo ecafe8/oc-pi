@@ -26,7 +26,10 @@ import {
 } from '@/runtime/paths.js'
 import type { ReviewFinding, ReviewResult } from '@/shared/types/review.js'
 import type { RuntimeStatus, SlotId } from '@/shared/types/core.js'
-import type { GoalToDocsStageContract } from '@/planning/goal-to-docs/types.js'
+import type {
+  GoalToDocsStageContract,
+  ResolvedStageTarget,
+} from '@/planning/goal-to-docs/types.js'
 import {
   applyReviewToWorkbench,
   handleGoalNew,
@@ -57,8 +60,11 @@ export type ArtifactMode = 'preview' | 'sandbox-write' | 'write'
 
 interface GoalStageExecutionResult {
   stageId: GoalToDocsStageContract['stageId']
+  primaryOutputSlot: SlotId
+  additionalOutputSlots: SlotId[]
   logicalArtifactPath: string
   resolvedArtifactAbsolutePath: string
+  resolvedTargets: ResolvedStageTarget[]
   artifactText: string
   review: ReviewResult
 }
@@ -216,18 +222,115 @@ export async function runGoalToDocsMvp(
     }),
   })
 
+  if (secondStageResult.review.status !== 'accepted') {
+    const pausedState = finalizeWorkbenchState({
+      state: goalResult.state,
+      run: secondStageResult.run,
+      review: secondStageResult.review,
+      timelineSummary: buildTimelineSummary(secondStageResult, artifactMode),
+    })
+
+    return {
+      workbenchState: pausedState,
+      run: secondStageResult.run,
+      latestReview: secondStageResult.review,
+      stages: [firstStageResult.stageResult, secondStageResult.stageResult],
+      wroteArtifact: shouldWriteArtifacts,
+    }
+  }
+
+  const thirdStage = DEFAULT_GOAL_TO_DOCS_STAGES[2]
+
+  if (!thirdStage) {
+    throw new Error('Missing default third-stage goal-to-docs configuration')
+  }
+
+  const thirdStageWriterRole = DEFAULT_ROLE_CONFIGS.find(
+    (role) => role.roleId === thirdStage.writerRoleId,
+  )
+  const thirdStageReviewerRole = DEFAULT_ROLE_CONFIGS.find(
+    (role) => role.roleId === thirdStage.reviewerRoleId,
+  )
+
+  if (!thirdStageWriterRole || !thirdStageReviewerRole) {
+    throw new Error('Missing third-stage writer or reviewer role configuration')
+  }
+
+  let thirdStageInput: GoalStageExecutionResult
+
+  try {
+    thirdStageInput = resolveStageInputArtifact({
+      upstreamStageResult: secondStageResult.stageResult,
+      expectedSlotId: 'capability-map',
+    })
+  } catch (error) {
+    const blockedRun = markStageBlocked({
+      run: secondStageResult.run,
+      stage: thirdStage,
+      issue: error instanceof Error ? error.message : String(error),
+    })
+    const blockedState = finalizeWorkbenchState({
+      state: goalResult.state,
+      run: blockedRun,
+      review: secondStageResult.review,
+      timelineSummary: `Blocked ${thirdStage.stageId}: ${error instanceof Error ? error.message : String(error)}`,
+    })
+
+    return {
+      workbenchState: blockedState,
+      run: blockedRun,
+      latestReview: secondStageResult.review,
+      stages: [firstStageResult.stageResult, secondStageResult.stageResult],
+      wroteArtifact: shouldWriteArtifacts,
+    }
+  }
+
+  const thirdStageWriterModel = resolveProviderModelForRole(thirdStageWriterRole)
+  const thirdStageResult = await executeStage({
+    run: secondStageResult.run,
+    stage: thirdStage,
+    goal: input.goal,
+    prompt: buildFeaturePlanningPrompt({
+      goal: input.goal,
+      capabilityMapArtifact: thirdStageInput.artifactText,
+    }),
+    cliRoot: input.cliRoot,
+    provider: thirdStageWriterModel.provider,
+    modelId: thirdStageWriterModel.resolvedModelId,
+    apiKey: await resolveProviderApiKey({
+      provider: thirdStageWriterRole.provider,
+      credentialStore,
+      loginBridge,
+      apiKeyCache,
+    }),
+    shouldWriteArtifacts,
+    artifactMode,
+    agentBridge,
+    reviewerRole: thirdStageReviewerRole,
+    reviewerApiKey: await resolveProviderApiKey({
+      provider: thirdStageReviewerRole.provider,
+      credentialStore,
+      loginBridge,
+      apiKeyCache,
+    }),
+  })
+
   const finalState = finalizeWorkbenchState({
     state: goalResult.state,
-    run: secondStageResult.run,
-    review: secondStageResult.review,
-    timelineSummary: buildTimelineSummary(secondStageResult, artifactMode),
+    run: thirdStageResult.run,
+    review: thirdStageResult.review,
+    timelineSummary: buildTimelineSummary(thirdStageResult, artifactMode),
   })
 
   return {
     workbenchState: finalState,
-    run: secondStageResult.run,
-    latestReview: secondStageResult.review,
-    stages: [firstStageResult.stageResult, secondStageResult.stageResult],
+    run: thirdStageResult.run,
+    latestReview: thirdStageResult.review,
+    stages: [
+      firstStageResult.stageResult,
+      secondStageResult.stageResult,
+      thirdStageResult.stageResult,
+    ],
     wroteArtifact: shouldWriteArtifacts,
   }
 }
@@ -326,8 +429,11 @@ async function executeStage(input: ExecuteStageInput): Promise<ExecuteStageOutpu
     review: executed.review,
     stageResult: {
       stageId: input.stage.stageId,
+      primaryOutputSlot: input.stage.primaryOutputSlot,
+      additionalOutputSlots: input.stage.additionalOutputSlots ?? [],
       logicalArtifactPath,
       resolvedArtifactAbsolutePath,
+      resolvedTargets: executed.resolvedTargets,
       artifactText: normalizedArtifactText,
       review: executed.review,
     },
@@ -450,6 +556,25 @@ function buildStageReviewPrompt(input: {
     return buildReviewPrompt(input.goal, input.artifactMarkdown)
   }
 
+  if (input.stage.stageId === 'feature-planning') {
+    return [
+      '你是 doc-reviewer 文档审查者。',
+      '请审查下面的 MVP Features MVP 功能清单草案。',
+      '必须重点检查：front matter 是否只包含固定的 title 与 description，H1 是否正确，是否同时包含 Feature List 功能清单、MVP Scope MVP 范围、Prioritization Rule 优先级规则、Open Questions 待定问题。',
+      '重要说明：该文档按当前协议本来就需要同时承载 feature-plan 功能规划槽位 与 mvp-scope MVP 范围槽位；只要 Feature List 与 MVP Scope 两个分区都清晰存在，就不能因为“双槽位共用一个文档”本身而判为问题。',
+      '只允许输出以下纯文本格式：',
+      'STATUS: accepted 或 STATUS: changes-requested',
+      'SUMMARY: 一句中文摘要',
+      '如果需要修改，可额外输出一到三行 FINDING: <问题描述>',
+      '如果文档已经可接受，不要输出 FINDING。',
+      '',
+      `原始用户目标: ${input.goal}`,
+      '',
+      '待审查文档:',
+      input.artifactMarkdown,
+    ].join('\n')
+  }
+
   return [
     '你是 goal-reviewer 目标审查者。',
     '请审查下面的 Capability Breakdown 能力拆解草案。',
@@ -490,6 +615,15 @@ function normalizeArtifactDocument(input: {
       title: 'Capabilities Overview 能力总览',
       description: 'apps/oc-pi-cli 的一级能力地图与能力边界概览',
       heading: '# Capabilities Overview 能力总览',
+    })
+  }
+
+  if (input.logicalArtifactPath === 'apps/web-docs/content/docs/planning/mvp-features.md') {
+    return normalizeDocumentFrontMatter({
+      content: input.content,
+      title: 'MVP Features MVP 功能清单',
+      description: 'apps/oc-pi-cli 当前第一批核心功能与其作用边界定义',
+      heading: '# MVP Features MVP 功能清单',
     })
   }
 
@@ -540,12 +674,20 @@ function validateArtifactDocument(input: {
   reviewerRoleId: ReviewResult['reviewerRoleId']
 }): ArtifactValidationResult {
   if (input.logicalArtifactPath !== 'apps/web-docs/content/docs/capabilities/overview.mdx') {
-    return {
-      isValid: true,
-      findings: [],
+    if (input.logicalArtifactPath !== 'apps/web-docs/content/docs/planning/mvp-features.md') {
+      return {
+        isValid: true,
+        findings: [],
+      }
     }
+
+    return validateMvpFeaturesDocument(input.content)
   }
 
+  return validateCapabilitiesOverviewDocument(input.content)
+}
+
+function validateCapabilitiesOverviewDocument(content: string): ArtifactValidationResult {
   const findings: ReviewFinding[] = []
   const requiredLines = [
     'title: Capabilities Overview 能力总览',
@@ -558,7 +700,7 @@ function validateArtifactDocument(input: {
     '## External Baseline 外部能力基线',
   ]
 
-  const frontMatterMatch = input.content.match(/^---\n([\s\S]*?)\n---\n/m)
+  const frontMatterMatch = content.match(/^---\n([\s\S]*?)\n---\n/m)
   const frontMatterBody = frontMatterMatch?.[1] ?? ''
   const frontMatterLines = frontMatterBody
     .split('\n')
@@ -577,7 +719,7 @@ function validateArtifactDocument(input: {
   }
 
   for (const requiredLine of requiredLines) {
-    if (!input.content.includes(requiredLine)) {
+    if (!content.includes(requiredLine)) {
       findings.push({
         message: `缺少固定结构内容: ${requiredLine}`,
         severity: 'medium',
@@ -593,6 +735,57 @@ function validateArtifactDocument(input: {
     : {
         isValid: false,
         summary: '能力总览文档未通过固定模板结构校验',
+        findings,
+      }
+}
+
+function validateMvpFeaturesDocument(content: string): ArtifactValidationResult {
+  const findings: ReviewFinding[] = []
+  const requiredLines = [
+    'title: MVP Features MVP 功能清单',
+    'description: apps/oc-pi-cli 当前第一批核心功能与其作用边界定义',
+    '# MVP Features MVP 功能清单',
+    '## Feature List 功能清单',
+    '## MVP Scope MVP 范围',
+    '## Prioritization Rule 优先级规则',
+    '## Open Questions 待定问题',
+  ]
+
+  const frontMatterMatch = content.match(/^---\n([\s\S]*?)\n---\n/m)
+  const frontMatterBody = frontMatterMatch?.[1] ?? ''
+  const frontMatterLines = frontMatterBody
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const allowedFrontMatterLines = new Set([
+    'title: MVP Features MVP 功能清单',
+    'description: apps/oc-pi-cli 当前第一批核心功能与其作用边界定义',
+  ])
+
+  if (frontMatterLines.length !== 2 || frontMatterLines.some((line) => !allowedFrontMatterLines.has(line))) {
+    findings.push({
+      message: 'mvp features front matter 必须且只能包含 title 与 description 两个固定字段。',
+      severity: 'medium',
+    })
+  }
+
+  for (const requiredLine of requiredLines) {
+    if (!content.includes(requiredLine)) {
+      findings.push({
+        message: `缺少固定结构内容: ${requiredLine}`,
+        severity: 'medium',
+      })
+    }
+  }
+
+  return findings.length === 0
+    ? {
+        isValid: true,
+        findings: [],
+      }
+    : {
+        isValid: false,
+        summary: 'MVP 功能清单文档未通过固定模板结构校验',
         findings,
       }
 }
@@ -706,6 +899,59 @@ function buildCapabilityBreakdownPrompt(input: {
     '',
     '已接受的 Product Goal Draft 产品目标草案：',
     input.productGoalArtifact,
+  ].join('\n')
+}
+
+function buildFeaturePlanningPrompt(input: {
+  goal: string
+  capabilityMapArtifact: string
+}): string {
+  return [
+    '你正在为 apps/oc-pi-cli 生成 MVP Features MVP 功能清单文档。',
+    '输出必须是 Markdown，并直接给出完整文档内容。',
+    '你必须严格填充下面这个固定模板，不允许改 front matter 字段名，不允许改 H1，不允许改二级标题名称，不允许输出其他文档结构：',
+    '```md',
+    '---',
+    'title: MVP Features MVP 功能清单',
+    'description: apps/oc-pi-cli 当前第一批核心功能与其作用边界定义',
+    '---',
+    '',
+    '# MVP Features MVP 功能清单',
+    '',
+    '一句中文说明本页用途。',
+    '',
+    '## Feature List 功能清单',
+    '',
+    '- 列出 4-8 个 feature 功能单元，使用 `kebab-case 英文标识 + 中文语义` 或 `English + 中文语义` 一致风格。',
+    '- 这些 feature 必须来自 capability map 的一级能力，不要跳出当前产品边界。',
+    '',
+    '## MVP Scope MVP 范围',
+    '',
+    '- 列出当前阶段必须进入 MVP 的功能项。',
+    '- 明确哪些能力暂不进入当前范围。',
+    '',
+    '## Prioritization Rule 优先级规则',
+    '',
+    '- 给出 3-5 条优先级规则，说明为什么这些 feature 应先做。',
+    '',
+    '## Open Questions 待定问题',
+    '',
+    '- 给出 2-5 个待定问题或后续需要确认的事项。',
+    '```',
+    '补充规则：',
+    '- 文档目标路径是 apps/web-docs/content/docs/planning/mvp-features.md。',
+    '- 该文档需要同时承载 feature-plan 功能规划槽位 与 mvp-scope MVP 范围槽位。',
+    '- Feature List 功能清单 负责表达 feature-plan 功能规划槽位语义。',
+    '- MVP Scope MVP 范围 负责表达 mvp-scope MVP 范围槽位语义。',
+    '- 这两个槽位共享同一个物理文档是当前协议要求，不是冲突。',
+    '- 首次出现的英文术语必须带中文解释。',
+    '- 如果章节标题是技术术语，章节第一句话必须用中文解释。',
+    '- 不要留下只有英文没有中文解释的术语。',
+    '',
+    `原始用户目标: ${input.goal}`,
+    '',
+    '已接受的 Capability Map 能力地图草案：',
+    input.capabilityMapArtifact,
   ].join('\n')
 }
 

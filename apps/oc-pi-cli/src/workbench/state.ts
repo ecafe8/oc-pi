@@ -42,6 +42,8 @@ export function createWorkbenchInspectorState(): WorkbenchInspectorState {
   return {
     resolvedSlotId: "product-goal",
     resolvedPath: "",
+    additionalResolvedSlotIds: [],
+    resolvedTargets: [],
     lastExecutionStatus: "idle",
     blockingIssues: [],
   };
@@ -138,6 +140,9 @@ export function syncWorkbenchSessionFromGoalToDocsRun(state: WorkbenchState, run
       ...state.inspector,
       resolvedSlotId: currentStage?.primaryOutputSlot ?? state.inspector.resolvedSlotId,
       resolvedPath: currentStage?.artifactPaths[0] ?? state.inspector.resolvedPath,
+      additionalResolvedSlotIds:
+        currentStage?.additionalOutputSlots ?? state.inspector.additionalResolvedSlotIds,
+      resolvedTargets: currentStage?.resolvedTargets ?? state.inspector.resolvedTargets,
       blockingIssues: currentStage?.blockingIssues ?? state.inspector.blockingIssues,
     },
   };

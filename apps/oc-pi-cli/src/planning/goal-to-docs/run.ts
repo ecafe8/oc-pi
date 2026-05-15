@@ -67,6 +67,7 @@ export function executeGoalToDocsStage(
       }),
     ),
   ]
+  const uniqueArtifactPaths = [...new Set(resolvedTargets.map((target) => target.path))]
 
   const inReviewRun = {
     ...updateGoalToDocsStageStatus(runningRun, input.stage.stageId, 'in-review'),
@@ -74,7 +75,11 @@ export function executeGoalToDocsStage(
       stageRecord.stageId === input.stage.stageId
         ? {
             ...stageRecord,
-            artifactPaths: resolvedTargets.map((target) => target.path),
+            artifactPaths: uniqueArtifactPaths,
+            resolvedTargets: resolvedTargets.map((target) => ({
+              slotId: target.slotId,
+              path: target.path,
+            })),
           }
         : stageRecord,
     ),

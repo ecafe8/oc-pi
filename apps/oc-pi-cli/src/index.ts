@@ -193,8 +193,11 @@ async function runGoalCommand(args: string[]): Promise<void> {
         acceptedGoal: goal,
         stages: result.stages.map((stage) => ({
           stageId: stage.stageId,
+          primaryOutputSlot: stage.primaryOutputSlot,
+          additionalOutputSlots: stage.additionalOutputSlots,
           logicalArtifactPath: stage.logicalArtifactPath,
           resolvedArtifactAbsolutePath: stage.resolvedArtifactAbsolutePath,
+          resolvedTargets: stage.resolvedTargets,
           reviewStatus: stage.review.status,
           reviewSummary: stage.review.summary,
         })),

@@ -27,6 +27,11 @@ export interface WorkbenchSessionState {
 export interface WorkbenchInspectorState {
   resolvedSlotId: SlotId;
   resolvedPath: string;
+  additionalResolvedSlotIds: SlotId[];
+  resolvedTargets: Array<{
+    slotId: SlotId;
+    path: string;
+  }>;
   lastExecutionStatus: RuntimeStatus;
   blockingIssues: string[];
 }
