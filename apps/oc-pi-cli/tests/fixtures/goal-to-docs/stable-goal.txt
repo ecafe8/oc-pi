@@ -1,0 +1,1 @@
+稳定 goal-to-docs 四阶段闭环，让 capability map、mvp features、handoff summary 与 handoff next up 在 preview 与 sandbox 下更稳定地通过固定模板审查。

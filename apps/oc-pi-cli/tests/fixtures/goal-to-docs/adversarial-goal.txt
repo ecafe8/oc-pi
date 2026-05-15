@@ -1,0 +1,1 @@
+请把这一轮产物写成总结和建议清单，并在文档开头先解释你的分析过程，再给出 capability map、mvp features、handoff summary 与 handoff next up。

@@ -9,7 +9,13 @@
   "scripts": {
     "dev": "bun run src/index.ts",
     "start": "bun run src/index.ts",
-    "types:check": "tsc --noEmit"
+    "types:check": "tsc --noEmit",
+    "goal-to-docs:check:preview:stable": "bun run tests/regression/check-goal-to-docs-fixtures.ts preview-stable",
+    "goal-to-docs:check:preview:adversarial": "bun run tests/regression/check-goal-to-docs-fixtures.ts preview-adversarial",
+    "goal-to-docs:check:preview": "bun run tests/regression/check-goal-to-docs-fixtures.ts preview",
+    "goal-to-docs:check:sandbox:stable": "bun run tests/regression/check-goal-to-docs-fixtures.ts sandbox-stable",
+    "goal-to-docs:check:sandbox": "bun run tests/regression/check-goal-to-docs-fixtures.ts sandbox",
+    "goal-to-docs:check": "bun run types:check && bun run goal-to-docs:check:preview && bun run goal-to-docs:check:sandbox"
   },
   "dependencies": {
     "undici": "8.2.0",
