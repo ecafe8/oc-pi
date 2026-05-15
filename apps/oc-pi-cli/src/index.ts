@@ -1,3 +1,6 @@
+import { createInterface } from 'node:readline/promises'
+import { stdin as input, stdout as output } from 'node:process'
+
 import {
   FileOAuthCredentialStore,
   PiModelAgentBridge,
@@ -5,6 +8,7 @@ import {
 } from '@/provider-adapters/index.js'
 import {
   type ArtifactMode,
+  type RealWriteConfirmationRequest,
   runGoalToDocsMvp,
 } from '@/planning/goal-to-docs/run-mvp.js'
 import { createDefaultWorkbenchState } from '@/runtime/default-config.js'
@@ -176,9 +180,10 @@ async function runGoalCommand(args: string[]): Promise<void> {
     goal,
     cliRoot,
     artifactMode,
+    confirmRealWrite: artifactMode === 'write' ? confirmRealDocsWrite : undefined,
   })
 
-  if (artifactMode === 'write') {
+  if (artifactMode === 'write' && !result.blockedByRealWriteGuard) {
     await sessionStore.write({
       workbenchState: result.workbenchState,
       latestRun: result.run,
@@ -200,8 +205,18 @@ async function runGoalCommand(args: string[]): Promise<void> {
           resolvedTargets: stage.resolvedTargets,
           reviewStatus: stage.review.status,
           reviewSummary: stage.review.summary,
+          wroteArtifact: stage.wroteArtifact,
+          realWriteGuard: stage.realWriteGuard
+            ? {
+                conflictLevel: stage.realWriteGuard.conflictLevel,
+                summary: stage.realWriteGuard.summary,
+                findings: stage.realWriteGuard.findings.map((finding) => finding.message),
+                action: stage.realWriteGuard.action,
+              }
+            : null,
         })),
         wroteArtifact: result.wroteArtifact,
+        blockedByRealWriteGuard: result.blockedByRealWriteGuard,
         latestReviewStatus: result.latestReview.status,
         latestReviewSummary: result.latestReview.summary,
       },
@@ -273,6 +288,46 @@ function resolveArtifactMode(input: {
   }
 
   return 'preview'
+}
+
+async function confirmRealDocsWrite(
+  request: RealWriteConfirmationRequest,
+): Promise<boolean> {
+  const rl = createInterface({ input, output })
+
+  try {
+    console.log(`[real-write-guard] stage=${request.stageId} slot=${request.primaryOutputSlot}`)
+    console.log(`[real-write-guard] path=${request.logicalArtifactPath}`)
+    console.log(`[real-write-guard] resolved=${request.resolvedArtifactAbsolutePath}`)
+    console.log(`[real-write-guard] conflict=${request.conflictLevel}`)
+    console.log(`[real-write-guard] summary=${request.summary}`)
+    console.log(`[real-write-guard] source=${request.sourceSummary}`)
+    console.log(`[real-write-guard] candidate=${request.candidateSummary}`)
+
+    if (request.findings.length > 0) {
+      for (const finding of request.findings) {
+        console.log(`[real-write-guard] finding=${finding}`)
+      }
+    }
+
+    for (const target of request.resolvedTargets) {
+      console.log(`[real-write-guard] target=${target.slotId} -> ${target.path}`)
+    }
+
+    const answer = await rl.question(
+      request.canForceWrite
+        ? 'Blocking conflict detected. Type "overwrite" to force real write, or press Enter to cancel: '
+        : 'Warning conflict detected. Type "yes" to continue real write, or press Enter to cancel: ',
+    )
+
+    const normalized = answer.trim().toLowerCase()
+
+    return request.canForceWrite
+      ? normalized === 'overwrite'
+      : normalized === 'yes'
+  } finally {
+    rl.close()
+  }
 }
 
 void main().catch((error: unknown) => {

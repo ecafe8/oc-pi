@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
 import {
@@ -46,6 +46,7 @@ export interface RunGoalToDocsMvpInput {
   goal: string
   cliRoot: string
   artifactMode?: ArtifactMode
+  confirmRealWrite?: (request: RealWriteConfirmationRequest) => Promise<boolean>
 }
 
 export interface RunGoalToDocsMvpResult {
@@ -54,9 +55,33 @@ export interface RunGoalToDocsMvpResult {
   latestReview: ReviewResult
   stages: GoalStageExecutionResult[]
   wroteArtifact: boolean
+  blockedByRealWriteGuard: boolean
 }
 
 export type ArtifactMode = 'preview' | 'sandbox-write' | 'write'
+
+export type RealDocsConflictLevel = 'none' | 'warning' | 'blocking'
+
+export interface RealWriteConfirmationRequest {
+  stageId: GoalToDocsStageContract['stageId']
+  primaryOutputSlot: SlotId
+  logicalArtifactPath: string
+  resolvedArtifactAbsolutePath: string
+  resolvedTargets: ResolvedStageTarget[]
+  conflictLevel: RealDocsConflictLevel
+  summary: string
+  findings: string[]
+  sourceSummary: string
+  candidateSummary: string
+  canForceWrite: boolean
+}
+
+interface RealWriteGuardResult {
+  conflictLevel: RealDocsConflictLevel
+  summary: string
+  findings: ReviewFinding[]
+  action: 'direct-write' | 'confirmed-write' | 'blocked'
+}
 
 interface GoalStageExecutionResult {
   stageId: GoalToDocsStageContract['stageId']
@@ -67,6 +92,8 @@ interface GoalStageExecutionResult {
   resolvedTargets: ResolvedStageTarget[]
   artifactText: string
   review: ReviewResult
+  wroteArtifact: boolean
+  realWriteGuard?: RealWriteGuardResult
 }
 
 export async function runGoalToDocsMvp(
@@ -133,9 +160,10 @@ export async function runGoalToDocsMvp(
       loginBridge,
       apiKeyCache,
     }),
+    confirmRealWrite: input.confirmRealWrite,
   })
 
-  if (firstStageResult.review.status !== 'accepted') {
+  if (!canContinueAfterStage(firstStageResult.stageResult)) {
     const pausedState = finalizeWorkbenchState({
       state: goalResult.state,
       run: firstStageResult.run,
@@ -148,7 +176,8 @@ export async function runGoalToDocsMvp(
       run: firstStageResult.run,
       latestReview: firstStageResult.review,
       stages: [firstStageResult.stageResult],
-      wroteArtifact: shouldWriteArtifacts,
+      wroteArtifact: firstStageResult.stageResult.wroteArtifact,
+      blockedByRealWriteGuard: isRealWriteBlocked(firstStageResult.stageResult),
     }
   }
 
@@ -189,7 +218,8 @@ export async function runGoalToDocsMvp(
       run: blockedRun,
       latestReview: firstStageResult.review,
       stages: [firstStageResult.stageResult],
-      wroteArtifact: shouldWriteArtifacts,
+      wroteArtifact: firstStageResult.stageResult.wroteArtifact,
+      blockedByRealWriteGuard: isRealWriteBlocked(firstStageResult.stageResult),
     }
   }
 
@@ -220,9 +250,10 @@ export async function runGoalToDocsMvp(
       loginBridge,
       apiKeyCache,
     }),
+    confirmRealWrite: input.confirmRealWrite,
   })
 
-  if (secondStageResult.review.status !== 'accepted') {
+  if (!canContinueAfterStage(secondStageResult.stageResult)) {
     const pausedState = finalizeWorkbenchState({
       state: goalResult.state,
       run: secondStageResult.run,
@@ -235,7 +266,11 @@ export async function runGoalToDocsMvp(
       run: secondStageResult.run,
       latestReview: secondStageResult.review,
       stages: [firstStageResult.stageResult, secondStageResult.stageResult],
-      wroteArtifact: shouldWriteArtifacts,
+      wroteArtifact:
+        firstStageResult.stageResult.wroteArtifact || secondStageResult.stageResult.wroteArtifact,
+      blockedByRealWriteGuard:
+        isRealWriteBlocked(firstStageResult.stageResult) ||
+        isRealWriteBlocked(secondStageResult.stageResult),
     }
   }
 
@@ -281,7 +316,11 @@ export async function runGoalToDocsMvp(
       run: blockedRun,
       latestReview: secondStageResult.review,
       stages: [firstStageResult.stageResult, secondStageResult.stageResult],
-      wroteArtifact: shouldWriteArtifacts,
+      wroteArtifact:
+        firstStageResult.stageResult.wroteArtifact || secondStageResult.stageResult.wroteArtifact,
+      blockedByRealWriteGuard:
+        isRealWriteBlocked(firstStageResult.stageResult) ||
+        isRealWriteBlocked(secondStageResult.stageResult),
     }
   }
 
@@ -313,7 +352,14 @@ export async function runGoalToDocsMvp(
       loginBridge,
       apiKeyCache,
     }),
+    confirmRealWrite: input.confirmRealWrite,
   })
+
+  const stages = [
+    firstStageResult.stageResult,
+    secondStageResult.stageResult,
+    thirdStageResult.stageResult,
+  ]
 
   const finalState = finalizeWorkbenchState({
     state: goalResult.state,
@@ -326,12 +372,9 @@ export async function runGoalToDocsMvp(
     workbenchState: finalState,
     run: thirdStageResult.run,
     latestReview: thirdStageResult.review,
-    stages: [
-      firstStageResult.stageResult,
-      secondStageResult.stageResult,
-      thirdStageResult.stageResult,
-    ],
-    wroteArtifact: shouldWriteArtifacts,
+    stages,
+    wroteArtifact: stages.some((stage) => stage.wroteArtifact),
+    blockedByRealWriteGuard: stages.some(isRealWriteBlocked),
   }
 }
 
@@ -349,6 +392,7 @@ interface ExecuteStageInput {
   agentBridge: PiModelAgentBridge
   reviewerRole: typeof DEFAULT_ROLE_CONFIGS[number]
   reviewerApiKey: string
+  confirmRealWrite?: (request: RealWriteConfirmationRequest) => Promise<boolean>
 }
 
 interface ExecuteStageOutput {
@@ -364,17 +408,25 @@ interface ArtifactValidationResult {
 }
 
 async function executeStage(input: ExecuteStageInput): Promise<ExecuteStageOutput> {
-  const artifactResponse = await input.agentBridge.prompt({
-    cwd: input.cliRoot,
-    provider: input.provider,
-    modelId: input.modelId,
-    prompt: input.prompt,
-    apiKey: input.apiKey,
-  })
   const logicalArtifactPath = resolveLogicalArtifactPath(input.stage.primaryOutputSlot)
   const resolvedArtifactAbsolutePath = resolveArtifactAbsolutePath({
     logicalArtifactPath,
     artifactMode: input.artifactMode,
+  })
+  const currentSourceText = input.artifactMode === 'write'
+    ? await readCurrentSourceText(resolvedArtifactAbsolutePath)
+    : null
+  const artifactResponse = await input.agentBridge.prompt({
+    cwd: input.cliRoot,
+    provider: input.provider,
+    modelId: input.modelId,
+    prompt: buildWriterPromptForArtifactMode({
+      prompt: input.prompt,
+      artifactMode: input.artifactMode,
+      logicalArtifactPath,
+      currentSourceText,
+    }),
+    apiKey: input.apiKey,
   })
   const normalizedArtifactText = normalizeArtifactDocument({
     logicalArtifactPath,
@@ -384,11 +436,13 @@ async function executeStage(input: ExecuteStageInput): Promise<ExecuteStageOutpu
     logicalArtifactPath,
     content: normalizedArtifactText,
     artifactSlotId: input.stage.primaryOutputSlot,
-    reviewerRoleId: input.stage.reviewerRoleId,
+      reviewerRoleId: input.stage.reviewerRoleId,
   })
+  let wroteArtifact = false
 
-  if (input.shouldWriteArtifacts) {
+  if (input.shouldWriteArtifacts && input.artifactMode === 'sandbox-write') {
     await writeArtifact(resolvedArtifactAbsolutePath, normalizedArtifactText)
+    wroteArtifact = true
   }
 
   const review = validation.isValid
@@ -424,8 +478,70 @@ async function executeStage(input: ExecuteStageInput): Promise<ExecuteStageOutpu
     reviewStatus: review.status,
   })
 
+  let finalRun = executed.run
+  let realWriteGuard: RealWriteGuardResult | undefined
+
+  if (input.artifactMode === 'write' && review.status === 'accepted') {
+    const guard = await assessRealDocsWriteGuard({
+      cliRoot: input.cliRoot,
+      stage: input.stage,
+      goal: input.goal,
+      logicalArtifactPath,
+      resolvedArtifactAbsolutePath,
+      resolvedTargets: executed.resolvedTargets,
+      currentSourceText: currentSourceText ?? '',
+      candidateText: normalizedArtifactText,
+      candidateSummary: review.summary,
+      reviewerApiKey: input.reviewerApiKey,
+      reviewerRole: input.reviewerRole,
+      agentBridge: input.agentBridge,
+    })
+
+    if (guard.conflictLevel === 'none') {
+      await writeArtifact(resolvedArtifactAbsolutePath, normalizedArtifactText)
+      wroteArtifact = true
+      realWriteGuard = {
+        ...guard,
+        action: 'direct-write',
+      }
+    } else {
+      const approved = await input.confirmRealWrite?.({
+        stageId: input.stage.stageId,
+        primaryOutputSlot: input.stage.primaryOutputSlot,
+        logicalArtifactPath,
+        resolvedArtifactAbsolutePath,
+        resolvedTargets: executed.resolvedTargets,
+        conflictLevel: guard.conflictLevel,
+        summary: guard.summary,
+        findings: guard.findings.map((finding) => finding.message),
+        sourceSummary: summarizeDocumentForDisplay(currentSourceText ?? ''),
+        candidateSummary: review.summary,
+        canForceWrite: guard.conflictLevel === 'blocking',
+      }) ?? false
+
+      if (approved) {
+        await writeArtifact(resolvedArtifactAbsolutePath, normalizedArtifactText)
+        wroteArtifact = true
+        realWriteGuard = {
+          ...guard,
+          action: 'confirmed-write',
+        }
+      } else {
+        realWriteGuard = {
+          ...guard,
+          action: 'blocked',
+        }
+        finalRun = markStageBlocked({
+          run: executed.run,
+          stage: input.stage,
+          issue: guard.summary,
+        })
+      }
+    }
+  }
+
   return {
-    run: executed.run,
+    run: finalRun,
     review: executed.review,
     stageResult: {
       stageId: input.stage.stageId,
@@ -436,6 +552,8 @@ async function executeStage(input: ExecuteStageInput): Promise<ExecuteStageOutpu
       resolvedTargets: executed.resolvedTargets,
       artifactText: normalizedArtifactText,
       review: executed.review,
+      wroteArtifact,
+      realWriteGuard,
     },
   }
 }
@@ -470,6 +588,52 @@ async function reviewGoalArtifact(input: {
     artifactSlotId: input.artifactSlotId,
     reviewerRoleId: input.reviewerRoleId,
   })
+}
+
+async function assessRealDocsWriteGuard(input: {
+  cliRoot: string
+  stage: GoalToDocsStageContract
+  goal: string
+  logicalArtifactPath: string
+  resolvedArtifactAbsolutePath: string
+  resolvedTargets: ResolvedStageTarget[]
+  currentSourceText: string
+  candidateText: string
+  candidateSummary: string
+  reviewerApiKey: string
+  reviewerRole: typeof DEFAULT_ROLE_CONFIGS[number]
+  agentBridge: PiModelAgentBridge
+}): Promise<Omit<RealWriteGuardResult, 'action'>> {
+  const staticGuard = evaluateStaticRealDocsConflict({
+    logicalArtifactPath: input.logicalArtifactPath,
+    currentSourceText: input.currentSourceText,
+    candidateText: input.candidateText,
+  })
+
+  if (staticGuard.conflictLevel === 'blocking') {
+    return staticGuard
+  }
+
+  const response = await input.agentBridge.prompt({
+    cwd: input.cliRoot,
+    provider: input.reviewerRole.provider,
+    modelId: resolveProviderModelForRole(input.reviewerRole).resolvedModelId,
+    apiKey: input.reviewerApiKey,
+    prompt: buildRealDocsWriteGuardPrompt({
+      goal: input.goal,
+      logicalArtifactPath: input.logicalArtifactPath,
+      currentSourceText: input.currentSourceText,
+      candidateText: input.candidateText,
+      candidateSummary: input.candidateSummary,
+      resolvedTargets: input.resolvedTargets,
+    }),
+  })
+
+  const modelGuard = parseRealDocsWriteGuardResponse(response.text)
+
+  return compareGuardSeverity(staticGuard, modelGuard) >= 0
+    ? staticGuard
+    : modelGuard
 }
 
 function parseReviewResponse(input: {
@@ -508,6 +672,32 @@ function createValidationFailedReview(input: {
     summary: input.validation.summary ?? '文档结构不符合固定模板要求',
     findings: input.validation.findings,
   }
+}
+
+function buildWriterPromptForArtifactMode(input: {
+  prompt: string
+  artifactMode: ArtifactMode
+  logicalArtifactPath: string
+  currentSourceText: string | null
+}): string {
+  if (input.artifactMode !== 'write') {
+    return input.prompt
+  }
+
+  return [
+    input.prompt,
+    '',
+    '你当前处于真实 docs 更新模式。',
+    '- 必须基于当前真源页面更新，而不是把页面整体改写成另一个产品。',
+    '- 必须保留页面类型、主要章节结构与 apps/oc-pi-cli 当前产品边界。',
+    '- 仅补充或更新与当前阶段目标直接相关的信息。',
+    `- 当前真实目标路径: ${input.logicalArtifactPath}`,
+    '',
+    '当前真源文档：',
+    '```md',
+    input.currentSourceText?.trim() || '当前页面为空，可按固定模板生成首版内容。',
+    '```',
+  ].join('\n')
 }
 
 function buildGoalFramingPrompt(goal: string): string {
@@ -955,10 +1145,59 @@ function buildFeaturePlanningPrompt(input: {
   ].join('\n')
 }
 
+function buildRealDocsWriteGuardPrompt(input: {
+  goal: string
+  logicalArtifactPath: string
+  currentSourceText: string
+  candidateText: string
+  candidateSummary: string
+  resolvedTargets: ResolvedStageTarget[]
+}): string {
+  return [
+    '你是 real-docs-guard 真实文档写入守卫。',
+    '请比较当前真源文档、当前用户 goal 与候选文档，判断是否可以安全覆盖真实 docs。',
+    '判断标准：',
+    '- none: 候选文档仍是同一页面类型、同一产品边界、与当前 goal 无明显冲突。',
+    '- warning: 候选文档大体相关，但对原文重点、边界或当前 goal 的表达存在可疑漂移，需要人工确认。',
+    '- blocking: 候选文档明显偏离当前产品边界、页面职责，或已经像是另一个产品方向，默认必须阻止覆盖。',
+    '- product/vision.md 必须继续围绕 apps/oc-pi-cli、goal-to-docs、review-loop、interactive-workbench、agent-role-config 等主线。',
+    '- capabilities/overview.mdx 必须继续是一级能力地图页面，而不是另一个产品介绍。',
+    '- planning/mvp-features.md 必须继续同时承载 feature-plan 功能规划 与 mvp-scope MVP 范围 两个槽位语义。',
+    '只允许输出以下纯文本格式：',
+    'CONFLICT: none 或 CONFLICT: warning 或 CONFLICT: blocking',
+    'SUMMARY: 一句中文摘要',
+    '如果存在问题，可额外输出一到三行 FINDING: <问题描述>',
+    '如果无问题，不要输出 FINDING。',
+    '',
+    `目标路径: ${input.logicalArtifactPath}`,
+    `解析槽位: ${input.resolvedTargets.map((target) => `${target.slotId} -> ${target.path}`).join(', ')}`,
+    `当前用户 goal: ${input.goal}`,
+    `候选文档摘要: ${input.candidateSummary}`,
+    '',
+    '当前真源文档：',
+    '```md',
+    input.currentSourceText,
+    '```',
+    '',
+    '候选文档：',
+    '```md',
+    input.candidateText,
+    '```',
+  ].join('\n')
+}
+
 function buildTimelineSummary(
   stageResult: ExecuteStageOutput,
   artifactMode: ArtifactMode,
 ): string {
+  if (stageResult.stageResult.realWriteGuard?.action === 'blocked') {
+    return `Blocked real write for ${stageResult.review.artifactSlotId} at ${stageResult.stageResult.logicalArtifactPath}: ${stageResult.stageResult.realWriteGuard.summary}`
+  }
+
+  if (stageResult.stageResult.realWriteGuard?.action === 'confirmed-write') {
+    return `Wrote ${stageResult.review.artifactSlotId} to ${stageResult.stageResult.logicalArtifactPath} after confirmation`
+  }
+
   if (artifactMode === 'write') {
     return `Wrote ${stageResult.review.artifactSlotId} to ${stageResult.stageResult.logicalArtifactPath}`
   }
@@ -1073,5 +1312,339 @@ function resolveRuntimeStatus(
     case 'pending':
     default:
       return 'running'
+  }
+}
+
+async function readCurrentSourceText(path: string): Promise<string> {
+  try {
+    return await readFile(path, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return ''
+    }
+
+    throw error
+  }
+}
+
+function canContinueAfterStage(stageResult: GoalStageExecutionResult): boolean {
+  return stageResult.review.status === 'accepted' && !isRealWriteBlocked(stageResult)
+}
+
+function isRealWriteBlocked(stageResult: GoalStageExecutionResult): boolean {
+  return stageResult.realWriteGuard?.action === 'blocked'
+}
+
+function summarizeDocumentForDisplay(content: string): string {
+  const summaryLines = stripLeadingFrontMatter(content)
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith('## '))
+    .slice(0, 3)
+
+  return summaryLines.join(' / ').slice(0, 240) || '当前真源页面为空'
+}
+
+function countMatchedAnchorGroups(content: string, groups: readonly string[][]): number {
+  return groups.filter((group) => group.some((anchor) => content.includes(anchor))).length
+}
+
+function countRetainedAnchorGroups(
+  sourceContent: string,
+  candidateContent: string,
+  groups: readonly string[][],
+): number {
+  return groups.filter((group) => {
+    const presentInSource = group.some((anchor) => sourceContent.includes(anchor))
+    const presentInCandidate = group.some((anchor) => candidateContent.includes(anchor))
+
+    return presentInSource && presentInCandidate
+  }).length
+}
+
+function addUniqueFinding(
+  findings: ReviewFinding[],
+  message: string,
+  severity: ReviewFinding['severity'],
+): void {
+  if (findings.some((finding) => finding.message === message)) {
+    return
+  }
+
+  findings.push({
+    message,
+    severity,
+  })
+}
+
+function evaluateStaticRealDocsConflict(input: {
+  logicalArtifactPath: string
+  currentSourceText: string
+  candidateText: string
+}): Omit<RealWriteGuardResult, 'action'> {
+  const candidate = input.candidateText.toLowerCase()
+  const source = input.currentSourceText.toLowerCase()
+  const findings: ReviewFinding[] = []
+  let productSignalStrength: 'strong' | 'weak' = 'strong'
+  const strongDriftGroups = [
+    ['firmware', '固件'],
+    ['flash', '烧录'],
+    ['target device', '目标设备'],
+    ['readback', '读回校验'],
+    ['checksum', '校验算法'],
+  ] satisfies string[][]
+  const softDriftGroups = [
+    ['hardware', '硬件'],
+    ['device', '设备'],
+    ['rollback', '回滚'],
+  ] satisfies string[][]
+  const strongDriftCount = countMatchedAnchorGroups(candidate, strongDriftGroups)
+  const softDriftCount = countMatchedAnchorGroups(candidate, softDriftGroups)
+
+  if (input.logicalArtifactPath === 'apps/web-docs/content/docs/product/vision.md') {
+    const subjectGroups = [
+      ['apps/oc-pi-cli'],
+      ['ai harness', '人工智能编排框架'],
+    ] satisfies string[][]
+    const productDirectionGroups = [
+      ['goal-to-docs', '目标到文档'],
+      ['review-loop', '审查循环'],
+      ['interactive-workbench', '交互工作台'],
+      ['agent-role-config', '角色化代理配置'],
+      ['artifact-routing', '产物路由'],
+      ['project bootstrap', '项目初始化'],
+      ['mcp', 'mcp 调用', 'mcp 集成'],
+      ['skills', 'skills 调用', 'skills 集成'],
+    ] satisfies string[][]
+    const subjectCount = countMatchedAnchorGroups(candidate, subjectGroups)
+    const productDirectionCount = countMatchedAnchorGroups(candidate, productDirectionGroups)
+    const retainedDirectionCount = countRetainedAnchorGroups(source, candidate, productDirectionGroups)
+
+    if (subjectCount === 0 || productDirectionCount <= 2 || retainedDirectionCount <= 1) {
+      productSignalStrength = 'weak'
+    }
+
+    if (subjectCount === 0) {
+      addUniqueFinding(
+        findings,
+        '候选 Product Vision 产品愿景 未继续明确围绕 apps/oc-pi-cli 当前产品展开。',
+        'high',
+      )
+    }
+
+    if (productDirectionCount <= 1 && strongDriftCount >= 2) {
+      addUniqueFinding(
+        findings,
+        '候选 Product Vision 产品愿景 缺少当前产品主线锚点，却出现了明显偏向其他产品方向的术语。',
+        'high',
+      )
+    }
+
+    if (retainedDirectionCount === 0 && productDirectionCount <= 2 && strongDriftCount >= 1) {
+      addUniqueFinding(
+        findings,
+        '候选 Product Vision 产品愿景 与当前真源页面几乎没有共享的主线能力锚点，且出现了越界漂移信号。',
+        'high',
+      )
+    }
+
+    if (retainedDirectionCount <= 1 && productDirectionCount <= 2 && (strongDriftCount >= 1 || softDriftCount >= 2)) {
+      addUniqueFinding(
+        findings,
+        '候选 Product Vision 产品愿景 只保留了很少的现有产品主线锚点，建议人工确认是否仍属于同一产品方向。',
+        'medium',
+      )
+    }
+  }
+
+  if (input.logicalArtifactPath === 'apps/web-docs/content/docs/capabilities/overview.mdx') {
+    const capabilityGroups = [
+      ['conversation orchestration', '对话编排'],
+      ['loop engine', '循环引擎'],
+      ['template engine', '模板引擎'],
+      ['docs generation', '文档生成'],
+      ['code generation', '代码生成'],
+      ['mcp integration', 'mcp 集成'],
+      ['skills integration', 'skills 集成'],
+      ['context management', '上下文管理'],
+    ] satisfies string[][]
+    const capabilityCount = countMatchedAnchorGroups(candidate, capabilityGroups)
+    const retainedCapabilityCount = countRetainedAnchorGroups(source, candidate, capabilityGroups)
+
+    if (capabilityCount < 5 || retainedCapabilityCount < 4) {
+      productSignalStrength = 'weak'
+    }
+
+    if (capabilityCount < 3) {
+      addUniqueFinding(
+        findings,
+        '候选 Capabilities Overview 能力总览 没有继续保持一级能力地图的核心能力锚点。',
+        'high',
+      )
+    }
+
+    if (capabilityCount <= 2 && strongDriftCount >= 2) {
+      addUniqueFinding(
+        findings,
+        '候选 Capabilities Overview 能力总览 的能力锚点明显不足，却出现了偏向其他产品方向的信号。',
+        'high',
+      )
+    }
+
+    if (capabilityCount < 5 || retainedCapabilityCount < 4) {
+      addUniqueFinding(
+        findings,
+        '候选 Capabilities Overview 能力总览 保留的一级能力模块偏少，建议人工确认是否仍是同一张能力地图。',
+        'medium',
+      )
+    }
+  }
+
+  if (input.logicalArtifactPath === 'apps/web-docs/content/docs/planning/mvp-features.md') {
+    const productFeatureGroups = [
+      ['goal-to-docs', '目标到文档'],
+      ['review-loop', '审查循环'],
+      ['interactive-workbench', '交互工作台'],
+      ['agent-role-config', '角色化代理配置'],
+      ['artifact-routing', '产物路由'],
+      ['project bootstrap', '项目初始化'],
+      ['conversation orchestration', '对话编排'],
+      ['context management', '上下文管理'],
+      ['docs generation', '文档生成'],
+      ['template engine', '模板引擎'],
+      ['skills integration', 'skills 集成'],
+      ['mcp integration', 'mcp 集成'],
+    ] satisfies string[][]
+    const sharedSlotGroups = [
+      ['feature list', '功能清单'],
+      ['mvp scope', 'mvp 范围'],
+      ['prioritization rule', '优先级规则'],
+      ['open questions', '待定问题'],
+    ] satisfies string[][]
+    const productFeatureCount = countMatchedAnchorGroups(candidate, productFeatureGroups)
+    const sharedSlotCount = countMatchedAnchorGroups(candidate, sharedSlotGroups)
+
+    if (productFeatureCount < 5 || sharedSlotCount < 3) {
+      productSignalStrength = 'weak'
+    }
+
+    if (productFeatureCount <= 2 && strongDriftCount >= 2) {
+      addUniqueFinding(
+        findings,
+        '候选 MVP Features MVP 功能清单 几乎没有保留当前产品功能主线，却明显转向了其他产品方向。',
+        'high',
+      )
+    }
+
+    if (sharedSlotCount < 3) {
+      addUniqueFinding(
+        findings,
+        '候选 MVP Features MVP 功能清单 对共享文档职责的表达偏弱，建议人工确认是否仍同时承载 feature-plan 与 mvp-scope。',
+        'medium',
+      )
+    }
+
+    if (productFeatureCount < 4 && (strongDriftCount >= 1 || softDriftCount >= 2)) {
+      addUniqueFinding(
+        findings,
+        '候选 MVP Features MVP 功能清单 当前产品功能锚点偏少，且出现了可疑的越界漂移信号。',
+        'medium',
+      )
+    }
+  }
+
+  if (source.includes('apps/oc-pi-cli') && !candidate.includes('apps/oc-pi-cli')) {
+    addUniqueFinding(
+      findings,
+      '候选文档丢失了当前真源中明确存在的 apps/oc-pi-cli 产品主体。',
+      input.logicalArtifactPath === 'apps/web-docs/content/docs/product/vision.md' ? 'high' : 'medium',
+    )
+  }
+
+  if (strongDriftCount >= 3 && productSignalStrength === 'weak') {
+    addUniqueFinding(
+      findings,
+      '候选文档包含多处硬件写入或设备校验方向术语，疑似偏离当前产品边界。',
+      'high',
+    )
+  } else if (strongDriftCount >= 2 || (strongDriftCount >= 1 && softDriftCount >= 2)) {
+    addUniqueFinding(
+      findings,
+      '候选文档出现了多处与硬件写入或设备校验相关的漂移信号，建议人工确认。',
+      'medium',
+    )
+  }
+
+  if (findings.some((finding) => finding.severity === 'high')) {
+    return {
+      conflictLevel: 'blocking',
+      summary: '静态语义边界校验判定候选文档已明显偏离当前真实 docs 页面职责。',
+      findings,
+    }
+  }
+
+  if (findings.length > 0) {
+    return {
+      conflictLevel: 'warning',
+      summary: '静态语义边界校验发现候选文档存在可疑漂移，需要人工确认。',
+      findings,
+    }
+  }
+
+  return {
+    conflictLevel: 'none',
+    summary: '静态语义边界校验未发现明显冲突。',
+    findings: [],
+  }
+}
+
+function parseRealDocsWriteGuardResponse(text: string): Omit<RealWriteGuardResult, 'action'> {
+  const conflictMatch = text.match(/^CONFLICT:\s*(none|warning|blocking)$/m)
+  const summaryMatch = text.match(/^SUMMARY:\s*(.+)$/m)
+  const findings = text
+    .split('\n')
+    .filter((line) => line.startsWith('FINDING:'))
+    .map((line): ReviewFinding => ({
+      message: line.replace(/^FINDING:\s*/, '').trim(),
+      severity: 'medium',
+    }))
+
+  if (!conflictMatch || !summaryMatch) {
+    return {
+      conflictLevel: 'blocking',
+      summary: '真实 docs 语义冲突检测结果无法解析，已默认阻止覆盖。',
+      findings: [
+        {
+          message: 'real-docs-guard 输出不符合预期格式，无法安全判断是否可以覆盖真实 docs。',
+          severity: 'high',
+        },
+      ],
+    }
+  }
+
+  return {
+    conflictLevel: conflictMatch[1] as RealDocsConflictLevel,
+    summary: summaryMatch[1]?.trim() ?? '真实 docs 语义冲突检测未返回摘要，已按保守策略处理。',
+    findings,
+  }
+}
+
+function compareGuardSeverity(
+  left: Omit<RealWriteGuardResult, 'action'>,
+  right: Omit<RealWriteGuardResult, 'action'>,
+): number {
+  return conflictSeverity(left.conflictLevel) - conflictSeverity(right.conflictLevel)
+}
+
+function conflictSeverity(level: RealDocsConflictLevel): number {
+  switch (level) {
+    case 'blocking':
+      return 2
+    case 'warning':
+      return 1
+    case 'none':
+    default:
+      return 0
   }
 }
