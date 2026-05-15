@@ -63,6 +63,7 @@ bun --filter oc-pi-cli run types:check
 ```bash
 bun run src/index.ts goal new "两阶段 preview 仅预览路径"
 bun run src/index.ts goal new --write-sandbox "两阶段写入 sandbox 验证完整流程"
+bun run src/index.ts goal new --write-sandbox "构建一个本地优先的 AI harness 人工智能编排框架，让使用者可以围绕目标、任务、代码与文档进行持续协作，而不是只进行一次性对话生成。"
 bun run src/index.ts goal new --write-docs "两阶段真实写入 docs"
 ```
 
