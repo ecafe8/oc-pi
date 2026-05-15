@@ -22,7 +22,7 @@ Feature Progress 功能进度用于按 `Progress Model 进度模型` 中的 feat
 - `agent-role-config 角色化代理配置`: `defined 已定义，已有最小配置协议草案`
 - `review-loop 审查循环`: `defined 已定义，已有第一版收敛规则`
 - `artifact-routing 产物路由`: `defined 已定义，已有第一版路由规则`
-- `interactive-workbench 交互工作台`: `defined 已定义，已有最小视图结构草案`
+- `interactive-workbench 交互工作台`: `defined 已定义，已收敛为左聊天、右信息、等待用户确认的最小 TUI 闭环方向`
 
 ## Current Risks 当前风险
 
@@ -30,11 +30,11 @@ Feature Progress 功能进度用于按 `Progress Model 进度模型` 中的 feat
 - 未来“用户项目模板”和“当前产品实现”仍容易被概念混淆
 - loop 输入输出契约已经有第一版草案，但还未下沉为实现协议
 - 角色化 Agent 配置已经有最小协议草案，但 provider adapter 提供商适配层尚未定义
-- 交互工作台已经有最小视图草案，但命令集与状态聚合还未映射到运行时模块
+- 交互工作台方向已收敛，但 `waiting-user 等待用户确认`、计划状态、执行过程状态与 context 上下文指标还未完整映射到运行时状态模型
 
 ## Next Focus 下一步聚焦
 
 - 把 `goal-to-docs 目标到文档` 细化成阶段产物与执行步骤
-- 把 `interactive-workbench 交互工作台` 视图结构映射到 `apps/oc-pi-cli/src` 模块边界
+- 把 `interactive-workbench 交互工作台` 的“左聊天、右信息、顶部状态、底部输入”结构映射到 `apps/oc-pi-cli/src` 模块边界
 - 把 `review-loop 审查循环` 与 `artifact-routing 产物路由` 下沉成可执行协议
 - 明确 provider adapter 提供商适配层如何把逻辑模型名映射为真实模型标识
