@@ -16,6 +16,7 @@ Backlog 待办池用于记录当前产品规划阶段尚未开工的高优先任
 - 固定 `apps/oc-pi-cli/src` 的模块结构草案
 - 把 `Runtime TypeScript Protocol 运行时 TypeScript 协议草案` 下沉到 `apps/oc-pi-cli/src` 真实类型文件
 - 基于运行时类型草案建立 `planning/review/routing/workbench` 的最小代码骨架
+- 把 `interactive-workbench 交互工作台` 收敛为“左聊天、右信息、顶部状态、底部输入”的最小 TUI 闭环，并按小任务逐步下沉到 `apps/oc-pi-cli/src/workbench`
 
 ## Medium Priority 中优先级
 
