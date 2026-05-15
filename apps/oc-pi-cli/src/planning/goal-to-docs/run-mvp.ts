@@ -83,6 +83,16 @@ interface RealWriteGuardResult {
   action: 'direct-write' | 'confirmed-write' | 'blocked'
 }
 
+interface ArtifactExecutionDetail {
+  slotId: SlotId
+  logicalArtifactPath: string
+  resolvedArtifactAbsolutePath: string
+  artifactText: string
+  review: ReviewResult
+  wroteArtifact: boolean
+  realWriteGuard?: RealWriteGuardResult
+}
+
 interface GoalStageExecutionResult {
   stageId: GoalToDocsStageContract['stageId']
   primaryOutputSlot: SlotId
@@ -94,6 +104,7 @@ interface GoalStageExecutionResult {
   review: ReviewResult
   wroteArtifact: boolean
   realWriteGuard?: RealWriteGuardResult
+  artifactDetails: ArtifactExecutionDetail[]
 }
 
 export async function runGoalToDocsMvp(
@@ -353,25 +364,142 @@ export async function runGoalToDocsMvp(
       apiKeyCache,
     }),
     confirmRealWrite: input.confirmRealWrite,
+    additionalArtifacts: [
+      {
+        slotId: 'mvp-scope',
+        buildPrompt: ({ primaryArtifactText }) => primaryArtifactText,
+        reusePrimaryArtifact: true,
+      },
+    ],
+  })
+
+  if (!canContinueAfterStage(thirdStageResult.stageResult)) {
+    const pausedState = finalizeWorkbenchState({
+      state: goalResult.state,
+      run: thirdStageResult.run,
+      review: thirdStageResult.review,
+      timelineSummary: buildTimelineSummary(thirdStageResult, artifactMode),
+    })
+
+    return {
+      workbenchState: pausedState,
+      run: thirdStageResult.run,
+      latestReview: thirdStageResult.review,
+      stages: [
+        firstStageResult.stageResult,
+        secondStageResult.stageResult,
+        thirdStageResult.stageResult,
+      ],
+      wroteArtifact:
+        firstStageResult.stageResult.wroteArtifact ||
+        secondStageResult.stageResult.wroteArtifact ||
+        thirdStageResult.stageResult.wroteArtifact,
+      blockedByRealWriteGuard:
+        isRealWriteBlocked(firstStageResult.stageResult) ||
+        isRealWriteBlocked(secondStageResult.stageResult) ||
+        isRealWriteBlocked(thirdStageResult.stageResult),
+    }
+  }
+
+  const fourthStage = DEFAULT_GOAL_TO_DOCS_STAGES[3]
+
+  if (!fourthStage) {
+    throw new Error('Missing default fourth-stage goal-to-docs configuration')
+  }
+
+  const fourthStageWriterRole = DEFAULT_ROLE_CONFIGS.find(
+    (role) => role.roleId === fourthStage.writerRoleId,
+  )
+  const fourthStageReviewerRole = DEFAULT_ROLE_CONFIGS.find(
+    (role) => role.roleId === fourthStage.reviewerRoleId,
+  )
+
+  if (!fourthStageWriterRole || !fourthStageReviewerRole) {
+    throw new Error('Missing fourth-stage writer or reviewer role configuration')
+  }
+
+  const productGoalInput = resolveStageInputArtifact({
+    upstreamStageResult: firstStageResult.stageResult,
+    expectedSlotId: 'product-goal',
+  })
+  const capabilityMapInput = resolveStageInputArtifact({
+    upstreamStageResult: secondStageResult.stageResult,
+    expectedSlotId: 'capability-map',
+  })
+  const featurePlanInput = resolveStageInputArtifact({
+    upstreamStageResult: thirdStageResult.stageResult,
+    expectedSlotId: 'feature-plan',
+  })
+  const mvpScopeInput = resolveArtifactDetail({
+    stageResult: thirdStageResult.stageResult,
+    slotId: 'mvp-scope',
+  })
+  const fourthStageWriterModel = resolveProviderModelForRole(fourthStageWriterRole)
+  const fourthStageReviewerApiKey = await resolveProviderApiKey({
+    provider: fourthStageReviewerRole.provider,
+    credentialStore,
+    loginBridge,
+    apiKeyCache,
+  })
+  const fourthStageResult = await executeStage({
+    run: thirdStageResult.run,
+    stage: fourthStage,
+    goal: input.goal,
+    prompt: buildHandoffSummaryPrompt({
+      goal: input.goal,
+      productGoalArtifact: productGoalInput.artifactText,
+      capabilityMapArtifact: capabilityMapInput.artifactText,
+      featurePlanArtifact: featurePlanInput.artifactText,
+      mvpScopeArtifact: mvpScopeInput.artifactText,
+    }),
+    cliRoot: input.cliRoot,
+    provider: fourthStageWriterModel.provider,
+    modelId: fourthStageWriterModel.resolvedModelId,
+    apiKey: await resolveProviderApiKey({
+      provider: fourthStageWriterRole.provider,
+      credentialStore,
+      loginBridge,
+      apiKeyCache,
+    }),
+    shouldWriteArtifacts,
+    artifactMode,
+    agentBridge,
+    reviewerRole: fourthStageReviewerRole,
+    reviewerApiKey: fourthStageReviewerApiKey,
+    confirmRealWrite: input.confirmRealWrite,
+    additionalArtifacts: [
+      {
+        slotId: 'handoff-next-up',
+        buildPrompt: ({ primaryArtifactText }) => buildHandoffNextUpPrompt({
+          goal: input.goal,
+          handoffSummaryArtifact: primaryArtifactText,
+          productGoalArtifact: productGoalInput.artifactText,
+          capabilityMapArtifact: capabilityMapInput.artifactText,
+          featurePlanArtifact: featurePlanInput.artifactText,
+          mvpScopeArtifact: mvpScopeInput.artifactText,
+        }),
+      },
+    ],
   })
 
   const stages = [
     firstStageResult.stageResult,
     secondStageResult.stageResult,
     thirdStageResult.stageResult,
+    fourthStageResult.stageResult,
   ]
 
   const finalState = finalizeWorkbenchState({
     state: goalResult.state,
-    run: thirdStageResult.run,
-    review: thirdStageResult.review,
-    timelineSummary: buildTimelineSummary(thirdStageResult, artifactMode),
+    run: fourthStageResult.run,
+    review: fourthStageResult.review,
+    timelineSummary: buildTimelineSummary(fourthStageResult, artifactMode),
   })
 
   return {
     workbenchState: finalState,
-    run: thirdStageResult.run,
-    latestReview: thirdStageResult.review,
+    run: fourthStageResult.run,
+    latestReview: fourthStageResult.review,
     stages,
     wroteArtifact: stages.some((stage) => stage.wroteArtifact),
     blockedByRealWriteGuard: stages.some(isRealWriteBlocked),
@@ -393,6 +521,11 @@ interface ExecuteStageInput {
   reviewerRole: typeof DEFAULT_ROLE_CONFIGS[number]
   reviewerApiKey: string
   confirmRealWrite?: (request: RealWriteConfirmationRequest) => Promise<boolean>
+  additionalArtifacts?: Array<{
+    slotId: SlotId
+    buildPrompt: (input: { primaryArtifactText: string }) => string
+    reusePrimaryArtifact?: boolean
+  }>
 }
 
 interface ExecuteStageOutput {
@@ -407,8 +540,149 @@ interface ArtifactValidationResult {
   findings: ReviewFinding[]
 }
 
+interface ExecuteArtifactInput {
+  stage: GoalToDocsStageContract
+  slotId: SlotId
+  goal: string
+  prompt: string
+  cliRoot: string
+  provider: string
+  modelId: string
+  apiKey: string
+  artifactMode: ArtifactMode
+  shouldWriteArtifacts: boolean
+  reviewerRole: typeof DEFAULT_ROLE_CONFIGS[number]
+  reviewerApiKey: string
+  agentBridge: PiModelAgentBridge
+  confirmRealWrite?: (request: RealWriteConfirmationRequest) => Promise<boolean>
+}
+
 async function executeStage(input: ExecuteStageInput): Promise<ExecuteStageOutput> {
-  const logicalArtifactPath = resolveLogicalArtifactPath(input.stage.primaryOutputSlot)
+  const primaryArtifact = await executeArtifact({
+    stage: input.stage,
+    slotId: input.stage.primaryOutputSlot,
+    goal: input.goal,
+    prompt: input.prompt,
+    cliRoot: input.cliRoot,
+    provider: input.provider,
+    modelId: input.modelId,
+    apiKey: input.apiKey,
+    artifactMode: input.artifactMode,
+    shouldWriteArtifacts: input.shouldWriteArtifacts,
+    reviewerRole: input.reviewerRole,
+    reviewerApiKey: input.reviewerApiKey,
+    agentBridge: input.agentBridge,
+    confirmRealWrite: input.confirmRealWrite,
+  })
+
+  const additionalArtifacts: ArtifactExecutionDetail[] = []
+
+  if (primaryArtifact.review.status === 'accepted' && !isRealWriteBlockedArtifact(primaryArtifact)) {
+    for (const additionalArtifact of input.additionalArtifacts ?? []) {
+      if (additionalArtifact.reusePrimaryArtifact) {
+        additionalArtifacts.push({
+          ...primaryArtifact,
+          slotId: additionalArtifact.slotId,
+        })
+        continue
+      }
+
+      additionalArtifacts.push(
+        await executeArtifact({
+          stage: input.stage,
+          slotId: additionalArtifact.slotId,
+          goal: input.goal,
+          prompt: additionalArtifact.buildPrompt({
+            primaryArtifactText: primaryArtifact.artifactText,
+          }),
+          cliRoot: input.cliRoot,
+          provider: input.provider,
+          modelId: input.modelId,
+          apiKey: input.apiKey,
+          artifactMode: input.artifactMode,
+          shouldWriteArtifacts: input.shouldWriteArtifacts,
+          reviewerRole: input.reviewerRole,
+          reviewerApiKey: input.reviewerApiKey,
+          agentBridge: input.agentBridge,
+          confirmRealWrite: input.confirmRealWrite,
+        }),
+      )
+    }
+  }
+
+  const aggregateReview = primaryArtifact.review.status === 'accepted'
+    ? additionalArtifacts.find((artifact) => artifact.review.status !== 'accepted')?.review ?? primaryArtifact.review
+    : primaryArtifact.review
+
+  const executed = executeGoalToDocsStage({
+    run: input.run,
+    stage: input.stage,
+    slotDefinitions: DEFAULT_SLOT_DEFINITIONS,
+    roles: DEFAULT_ROLE_CONFIGS,
+    artifactSummary: aggregateReview.summary,
+    findings: [
+      ...primaryArtifact.review.findings,
+      ...additionalArtifacts.flatMap((artifact) => artifact.review.findings),
+    ],
+    reviewStatus: aggregateReview.status,
+  })
+
+  let finalRun = executed.run
+
+  if ([primaryArtifact, ...additionalArtifacts].some(isRealWriteBlockedArtifact)) {
+    finalRun = markStageBlocked({
+      run: executed.run,
+      stage: input.stage,
+      issue: [primaryArtifact, ...additionalArtifacts]
+        .filter(isRealWriteBlockedArtifact)
+        .map((artifact) => artifact.realWriteGuard?.summary)
+        .filter(Boolean)
+        .join(' / '),
+    })
+  }
+
+  const wroteArtifact = [primaryArtifact, ...additionalArtifacts].some((artifact) => artifact.wroteArtifact)
+  const stageRealWriteGuard = resolveStageRealWriteGuard([primaryArtifact, ...additionalArtifacts])
+  const resolvedTargetMap = new Map(executed.resolvedTargets.map((target) => [target.slotId, target]))
+  const primaryResolvedTarget = resolvedTargetMap.get(input.stage.primaryOutputSlot)
+
+  return {
+    run: finalRun,
+    review: {
+      ...executed.review,
+      status: aggregateReview.status,
+      summary: aggregateReview.summary,
+      findings: [
+        ...primaryArtifact.review.findings,
+        ...additionalArtifacts.flatMap((artifact) => artifact.review.findings),
+      ],
+    },
+    stageResult: {
+      stageId: input.stage.stageId,
+      primaryOutputSlot: input.stage.primaryOutputSlot,
+      additionalOutputSlots: input.stage.additionalOutputSlots ?? [],
+      logicalArtifactPath: primaryResolvedTarget?.path ?? primaryArtifact.logicalArtifactPath,
+      resolvedArtifactAbsolutePath: primaryArtifact.resolvedArtifactAbsolutePath,
+      resolvedTargets: executed.resolvedTargets,
+      artifactText: primaryArtifact.artifactText,
+      review: {
+        ...executed.review,
+        status: aggregateReview.status,
+        summary: aggregateReview.summary,
+        findings: [
+          ...primaryArtifact.review.findings,
+          ...additionalArtifacts.flatMap((artifact) => artifact.review.findings),
+        ],
+      },
+      wroteArtifact,
+      realWriteGuard: stageRealWriteGuard,
+      artifactDetails: [primaryArtifact, ...additionalArtifacts],
+    },
+  }
+}
+
+async function executeArtifact(input: ExecuteArtifactInput): Promise<ArtifactExecutionDetail> {
+  const logicalArtifactPath = resolveLogicalArtifactPath(input.slotId)
   const resolvedArtifactAbsolutePath = resolveArtifactAbsolutePath({
     logicalArtifactPath,
     artifactMode: input.artifactMode,
@@ -435,8 +709,8 @@ async function executeStage(input: ExecuteStageInput): Promise<ExecuteStageOutpu
   const validation = validateArtifactDocument({
     logicalArtifactPath,
     content: normalizedArtifactText,
-    artifactSlotId: input.stage.primaryOutputSlot,
-      reviewerRoleId: input.stage.reviewerRoleId,
+    artifactSlotId: input.slotId,
+    reviewerRoleId: input.reviewerRole.roleId,
   })
   let wroteArtifact = false
 
@@ -454,31 +728,21 @@ async function executeStage(input: ExecuteStageInput): Promise<ExecuteStageOutpu
         provider: input.reviewerRole.provider,
         modelId: resolveProviderModelForRole(input.reviewerRole).resolvedModelId,
         agentBridge: input.agentBridge,
-        artifactSlotId: input.stage.primaryOutputSlot,
-        reviewerRoleId: input.stage.reviewerRoleId,
-        reviewPrompt: buildStageReviewPrompt({
+        artifactSlotId: input.slotId,
+        reviewerRoleId: input.reviewerRole.roleId,
+        reviewPrompt: buildArtifactReviewPrompt({
           goal: input.goal,
           stage: input.stage,
           artifactMarkdown: normalizedArtifactText,
+          artifactSlotId: input.slotId,
         }),
       })
     : createValidationFailedReview({
-        artifactSlotId: input.stage.primaryOutputSlot,
-        reviewerRoleId: input.stage.reviewerRoleId,
+        artifactSlotId: input.slotId,
+        reviewerRoleId: input.reviewerRole.roleId,
         validation,
       })
 
-  const executed = executeGoalToDocsStage({
-    run: input.run,
-    stage: input.stage,
-    slotDefinitions: DEFAULT_SLOT_DEFINITIONS,
-    roles: DEFAULT_ROLE_CONFIGS,
-    artifactSummary: review.summary,
-    findings: review.findings,
-    reviewStatus: review.status,
-  })
-
-  let finalRun = executed.run
   let realWriteGuard: RealWriteGuardResult | undefined
 
   if (input.artifactMode === 'write' && review.status === 'accepted') {
@@ -488,7 +752,7 @@ async function executeStage(input: ExecuteStageInput): Promise<ExecuteStageOutpu
       goal: input.goal,
       logicalArtifactPath,
       resolvedArtifactAbsolutePath,
-      resolvedTargets: executed.resolvedTargets,
+      resolvedTargets: [{ slotId: input.slotId, path: logicalArtifactPath }],
       currentSourceText: currentSourceText ?? '',
       candidateText: normalizedArtifactText,
       candidateSummary: review.summary,
@@ -507,10 +771,10 @@ async function executeStage(input: ExecuteStageInput): Promise<ExecuteStageOutpu
     } else {
       const approved = await input.confirmRealWrite?.({
         stageId: input.stage.stageId,
-        primaryOutputSlot: input.stage.primaryOutputSlot,
+        primaryOutputSlot: input.slotId,
         logicalArtifactPath,
         resolvedArtifactAbsolutePath,
-        resolvedTargets: executed.resolvedTargets,
+        resolvedTargets: [{ slotId: input.slotId, path: logicalArtifactPath }],
         conflictLevel: guard.conflictLevel,
         summary: guard.summary,
         findings: guard.findings.map((finding) => finding.message),
@@ -531,30 +795,18 @@ async function executeStage(input: ExecuteStageInput): Promise<ExecuteStageOutpu
           ...guard,
           action: 'blocked',
         }
-        finalRun = markStageBlocked({
-          run: executed.run,
-          stage: input.stage,
-          issue: guard.summary,
-        })
       }
     }
   }
 
   return {
-    run: finalRun,
-    review: executed.review,
-    stageResult: {
-      stageId: input.stage.stageId,
-      primaryOutputSlot: input.stage.primaryOutputSlot,
-      additionalOutputSlots: input.stage.additionalOutputSlots ?? [],
-      logicalArtifactPath,
-      resolvedArtifactAbsolutePath,
-      resolvedTargets: executed.resolvedTargets,
-      artifactText: normalizedArtifactText,
-      review: executed.review,
-      wroteArtifact,
-      realWriteGuard,
-    },
+    slotId: input.slotId,
+    logicalArtifactPath,
+    resolvedArtifactAbsolutePath,
+    artifactText: normalizedArtifactText,
+    review,
+    wroteArtifact,
+    realWriteGuard,
   }
 }
 
@@ -588,6 +840,23 @@ async function reviewGoalArtifact(input: {
     artifactSlotId: input.artifactSlotId,
     reviewerRoleId: input.reviewerRoleId,
   })
+}
+
+function resolveArtifactDetail(input: {
+  stageResult: GoalStageExecutionResult
+  slotId: SlotId
+}): ArtifactExecutionDetail {
+  const artifact = input.stageResult.artifactDetails.find((detail) => detail.slotId === input.slotId)
+
+  if (!artifact) {
+    throw new Error(`Missing artifact detail for slot ${input.slotId} in stage ${input.stageResult.stageId}`)
+  }
+
+  return artifact
+}
+
+function isRealWriteBlockedArtifact(artifact: ArtifactExecutionDetail): boolean {
+  return artifact.realWriteGuard?.action === 'blocked'
 }
 
 async function assessRealDocsWriteGuard(input: {
@@ -737,21 +1006,60 @@ function buildReviewPrompt(goal: string, artifactMarkdown: string): string {
   ].join('\n')
 }
 
-function buildStageReviewPrompt(input: {
+function buildArtifactReviewPrompt(input: {
   goal: string
   stage: GoalToDocsStageContract
   artifactMarkdown: string
+  artifactSlotId: SlotId
 }): string {
   if (input.stage.stageId === 'goal-framing') {
     return buildReviewPrompt(input.goal, input.artifactMarkdown)
   }
 
-  if (input.stage.stageId === 'feature-planning') {
+  if (input.artifactSlotId === 'feature-plan') {
     return [
       '你是 doc-reviewer 文档审查者。',
       '请审查下面的 MVP Features MVP 功能清单草案。',
       '必须重点检查：front matter 是否只包含固定的 title 与 description，H1 是否正确，是否同时包含 Feature List 功能清单、MVP Scope MVP 范围、Prioritization Rule 优先级规则、Open Questions 待定问题。',
       '重要说明：该文档按当前协议本来就需要同时承载 feature-plan 功能规划槽位 与 mvp-scope MVP 范围槽位；只要 Feature List 与 MVP Scope 两个分区都清晰存在，就不能因为“双槽位共用一个文档”本身而判为问题。',
+      '只允许输出以下纯文本格式：',
+      'STATUS: accepted 或 STATUS: changes-requested',
+      'SUMMARY: 一句中文摘要',
+      '如果需要修改，可额外输出一到三行 FINDING: <问题描述>',
+      '如果文档已经可接受，不要输出 FINDING。',
+      '',
+      `原始用户目标: ${input.goal}`,
+      '',
+      '待审查文档:',
+      input.artifactMarkdown,
+    ].join('\n')
+  }
+
+  if (input.artifactSlotId === 'handoff-summary') {
+    return [
+      '你是 doc-reviewer 文档审查者。',
+      '请审查下面的 Handoff Summary 交接摘要草案。',
+      '必须重点检查：front matter 是否只包含固定的 title 与 description，H1 是否正确，是否同时包含 Summary 当前交接摘要、Confirmed Outputs 已确认产物、Recommended Next Actions 建议下一步动作、Open Questions 待确认问题。',
+      '如果文档已经满足固定结构，即使条目内容较短或偏简洁，也应判为 accepted，不要因为还可以继续扩写就要求修改。',
+      '只允许输出以下纯文本格式：',
+      'STATUS: accepted 或 STATUS: changes-requested',
+      'SUMMARY: 一句中文摘要',
+      '如果需要修改，可额外输出一到三行 FINDING: <问题描述>',
+      '如果文档已经可接受，不要输出 FINDING。',
+      '',
+      `原始用户目标: ${input.goal}`,
+      '',
+      '待审查文档:',
+      input.artifactMarkdown,
+    ].join('\n')
+  }
+
+  if (input.artifactSlotId === 'handoff-next-up') {
+    return [
+      '你是 doc-reviewer 文档审查者。',
+      '请审查下面的 Handoff Next Up 下一步指引草案。',
+      '必须重点检查：front matter 是否只包含固定的 title 与 description，H1 是否正确，是否同时包含 Current Focus 当前焦点、Immediate Actions 立即动作、Watch Items 观察项。',
+      '如果文档已经满足固定结构，即使条目内容较短或偏简洁，也应判为 accepted，不要因为还可以继续扩写就要求修改。',
       '只允许输出以下纯文本格式：',
       'STATUS: accepted 或 STATUS: changes-requested',
       'SUMMARY: 一句中文摘要',
@@ -817,6 +1125,24 @@ function normalizeArtifactDocument(input: {
     })
   }
 
+  if (input.logicalArtifactPath === 'apps/web-docs/content/docs/tasks/handoff-summary.md') {
+    return normalizeDocumentFrontMatter({
+      content: input.content,
+      title: 'Handoff Summary 交接摘要',
+      description: '汇总 apps/oc-pi-cli 当前规划闭环的确认结论与下一步交接信息',
+      heading: '# Handoff Summary 交接摘要',
+    })
+  }
+
+  if (input.logicalArtifactPath === 'apps/web-docs/content/docs/tasks/handoff-next-up.md') {
+    return normalizeDocumentFrontMatter({
+      content: input.content,
+      title: 'Handoff Next Up 下一步指引',
+      description: '基于 apps/oc-pi-cli 当前交接摘要提炼的动态下一步动作',
+      heading: '# Handoff Next Up 下一步指引',
+    })
+  }
+
   return ensureTrailingNewline(input.content)
 }
 
@@ -863,18 +1189,21 @@ function validateArtifactDocument(input: {
   artifactSlotId: SlotId
   reviewerRoleId: ReviewResult['reviewerRoleId']
 }): ArtifactValidationResult {
-  if (input.logicalArtifactPath !== 'apps/web-docs/content/docs/capabilities/overview.mdx') {
-    if (input.logicalArtifactPath !== 'apps/web-docs/content/docs/planning/mvp-features.md') {
+  switch (input.logicalArtifactPath) {
+    case 'apps/web-docs/content/docs/capabilities/overview.mdx':
+      return validateCapabilitiesOverviewDocument(input.content)
+    case 'apps/web-docs/content/docs/planning/mvp-features.md':
+      return validateMvpFeaturesDocument(input.content)
+    case 'apps/web-docs/content/docs/tasks/handoff-summary.md':
+      return validateHandoffSummaryDocument(input.content)
+    case 'apps/web-docs/content/docs/tasks/handoff-next-up.md':
+      return validateHandoffNextUpDocument(input.content)
+    default:
       return {
         isValid: true,
         findings: [],
       }
-    }
-
-    return validateMvpFeaturesDocument(input.content)
   }
-
-  return validateCapabilitiesOverviewDocument(input.content)
 }
 
 function validateCapabilitiesOverviewDocument(content: string): ArtifactValidationResult {
@@ -980,6 +1309,107 @@ function validateMvpFeaturesDocument(content: string): ArtifactValidationResult 
       }
 }
 
+function validateHandoffSummaryDocument(content: string): ArtifactValidationResult {
+  const findings: ReviewFinding[] = []
+  const requiredLines = [
+    'title: Handoff Summary 交接摘要',
+    'description: 汇总 apps/oc-pi-cli 当前规划闭环的确认结论与下一步交接信息',
+    '# Handoff Summary 交接摘要',
+    '## Summary 当前交接摘要',
+    '## Confirmed Outputs 已确认产物',
+    '## Recommended Next Actions 建议下一步动作',
+    '## Open Questions 待确认问题',
+  ]
+
+  const frontMatterMatch = content.match(/^---\n([\s\S]*?)\n---\n/m)
+  const frontMatterBody = frontMatterMatch?.[1] ?? ''
+  const frontMatterLines = frontMatterBody
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const allowedFrontMatterLines = new Set([
+    'title: Handoff Summary 交接摘要',
+    'description: 汇总 apps/oc-pi-cli 当前规划闭环的确认结论与下一步交接信息',
+  ])
+
+  if (frontMatterLines.length !== 2 || frontMatterLines.some((line) => !allowedFrontMatterLines.has(line))) {
+    findings.push({
+      message: 'handoff summary front matter 必须且只能包含 title 与 description 两个固定字段。',
+      severity: 'medium',
+    })
+  }
+
+  for (const requiredLine of requiredLines) {
+    if (!content.includes(requiredLine)) {
+      findings.push({
+        message: `缺少固定结构内容: ${requiredLine}`,
+        severity: 'medium',
+      })
+    }
+  }
+
+  return findings.length === 0
+    ? {
+        isValid: true,
+        findings: [],
+      }
+    : {
+        isValid: false,
+        summary: '交接摘要文档未通过固定模板结构校验',
+        findings,
+      }
+}
+
+function validateHandoffNextUpDocument(content: string): ArtifactValidationResult {
+  const findings: ReviewFinding[] = []
+  const requiredLines = [
+    'title: Handoff Next Up 下一步指引',
+    'description: 基于 apps/oc-pi-cli 当前交接摘要提炼的动态下一步动作',
+    '# Handoff Next Up 下一步指引',
+    '## Current Focus 当前焦点',
+    '## Immediate Actions 立即动作',
+    '## Watch Items 观察项',
+  ]
+
+  const frontMatterMatch = content.match(/^---\n([\s\S]*?)\n---\n/m)
+  const frontMatterBody = frontMatterMatch?.[1] ?? ''
+  const frontMatterLines = frontMatterBody
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  const allowedFrontMatterLines = new Set([
+    'title: Handoff Next Up 下一步指引',
+    'description: 基于 apps/oc-pi-cli 当前交接摘要提炼的动态下一步动作',
+  ])
+
+  if (frontMatterLines.length !== 2 || frontMatterLines.some((line) => !allowedFrontMatterLines.has(line))) {
+    findings.push({
+      message: 'handoff next up front matter 必须且只能包含 title 与 description 两个固定字段。',
+      severity: 'medium',
+    })
+  }
+
+  for (const requiredLine of requiredLines) {
+    if (!content.includes(requiredLine)) {
+      findings.push({
+        message: `缺少固定结构内容: ${requiredLine}`,
+        severity: 'medium',
+      })
+    }
+  }
+
+  return findings.length === 0
+    ? {
+        isValid: true,
+        findings: [],
+      }
+    : {
+        isValid: false,
+        summary: '下一步指引文档未通过固定模板结构校验',
+        findings,
+      }
+}
+
 function resolvePreviewArtifactPath(artifactPath: string): string {
   const previewRelativePath = artifactPath.startsWith('apps/')
     ? artifactPath.slice('apps/'.length)
@@ -1037,6 +1467,8 @@ function buildCapabilityBreakdownPrompt(input: {
   return [
     '你正在为 apps/oc-pi-cli 生成 Capability Breakdown 能力拆解文档。',
     '输出必须是 Markdown，并直接给出完整文档内容。',
+    '失败条件：如果你输出模板外的说明、总结、前言、解释或编号段落，结果会被直接拒绝。',
+    '你必须从第一行 --- 开始输出，且只能输出最终文档本身。',
     '你必须严格填充下面这个固定模板，不允许改 front matter 字段名，不允许改 H1，不允许改二级标题名称，不允许输出其他文档结构：',
     '```md',
     '---',
@@ -1099,6 +1531,8 @@ function buildFeaturePlanningPrompt(input: {
   return [
     '你正在为 apps/oc-pi-cli 生成 MVP Features MVP 功能清单文档。',
     '输出必须是 Markdown，并直接给出完整文档内容。',
+    '失败条件：如果你输出模板外的说明、总结、建议清单、问答或额外前言，结果会被直接拒绝。',
+    '你必须从第一行 --- 开始输出，且只能输出最终文档本身。',
     '你必须严格填充下面这个固定模板，不允许改 front matter 字段名，不允许改 H1，不允许改二级标题名称，不允许输出其他文档结构：',
     '```md',
     '---',
@@ -1145,6 +1579,132 @@ function buildFeaturePlanningPrompt(input: {
   ].join('\n')
 }
 
+function buildHandoffSummaryPrompt(input: {
+  goal: string
+  productGoalArtifact: string
+  capabilityMapArtifact: string
+  featurePlanArtifact: string
+  mvpScopeArtifact: string
+}): string {
+  return [
+    '你正在为 apps/oc-pi-cli 生成 Handoff Summary 交接摘要文档。',
+    '输出必须是 Markdown，并直接给出完整文档内容。',
+    '失败条件：如果你输出模板外的说明、前言、分析过程或额外建议，结果会被直接拒绝。',
+    '你必须从第一行 --- 开始输出，且只能输出最终文档本身。',
+    '内容风格要求：每个分区使用简洁项目符号，不要写长篇分析，不要写编号执行计划，不要在条目下继续嵌套多层说明。',
+    '你必须严格填充下面这个固定模板，不允许改 front matter 字段名，不允许改 H1，不允许改二级标题名称，不允许输出其他文档结构：',
+    '```md',
+    '---',
+    'title: Handoff Summary 交接摘要',
+    'description: 汇总 apps/oc-pi-cli 当前规划闭环的确认结论与下一步交接信息',
+    '---',
+    '',
+    '# Handoff Summary 交接摘要',
+    '',
+    '一句中文说明本页用途。',
+    '',
+    '## Summary 当前交接摘要',
+    '',
+    '- 用 2-4 条总结当前闭环已经确认的方向。',
+    '',
+    '## Confirmed Outputs 已确认产物',
+    '',
+    '- 分别说明 product-goal、capability-map、feature-plan、mvp-scope 的确认结果。',
+    '',
+    '## Recommended Next Actions 建议下一步动作',
+    '',
+    '- 给出 3-5 条下一步建议，按优先级排序。',
+    '',
+    '## Open Questions 待确认问题',
+    '',
+    '- 给出 2-5 个仍待确认的问题。',
+    '```',
+    '补充规则：',
+    '- 文档目标路径是 apps/web-docs/content/docs/tasks/handoff-summary.md。',
+    '- 内容必须只做收束、确认与交接，不得重新定义新的产品方向。',
+    '- 首次出现的英文术语必须带中文解释。',
+    '- 如果章节标题是技术术语，章节第一句话必须用中文解释。',
+    '- 不要留下只有英文没有中文解释的术语。',
+    '',
+    `原始用户目标: ${input.goal}`,
+    '',
+    '已接受的 Product Goal 产品目标：',
+    input.productGoalArtifact,
+    '',
+    '已接受的 Capability Map 能力地图：',
+    input.capabilityMapArtifact,
+    '',
+    '已接受的 Feature Plan 功能规划：',
+    input.featurePlanArtifact,
+    '',
+    '已接受的 MVP Scope MVP 范围：',
+    input.mvpScopeArtifact,
+  ].join('\n')
+}
+
+function buildHandoffNextUpPrompt(input: {
+  goal: string
+  handoffSummaryArtifact: string
+  productGoalArtifact: string
+  capabilityMapArtifact: string
+  featurePlanArtifact: string
+  mvpScopeArtifact: string
+}): string {
+  return [
+    '你正在为 apps/oc-pi-cli 生成 Handoff Next Up 下一步指引文档。',
+    '输出必须是 Markdown，并直接给出完整文档内容。',
+    '失败条件：如果你输出模板外的说明、前言、分析过程或额外建议，结果会被直接拒绝。',
+    '你必须从第一行 --- 开始输出，且只能输出最终文档本身。',
+    '内容风格要求：只保留简洁的当前焦点、立即动作和观察项，不要把本页写成完整交接摘要或路线图。',
+    '你必须严格填充下面这个固定模板，不允许改 front matter 字段名，不允许改 H1，不允许改二级标题名称，不允许输出其他文档结构：',
+    '```md',
+    '---',
+    'title: Handoff Next Up 下一步指引',
+    'description: 基于 apps/oc-pi-cli 当前交接摘要提炼的动态下一步动作',
+    '---',
+    '',
+    '# Handoff Next Up 下一步指引',
+    '',
+    '一句中文说明本页用途。',
+    '',
+    '## Current Focus 当前焦点',
+    '',
+    '- 用 2-4 条说明当前最应聚焦的方向。',
+    '',
+    '## Immediate Actions 立即动作',
+    '',
+    '- 给出 3-5 条可立刻执行的动作。',
+    '',
+    '## Watch Items 观察项',
+    '',
+    '- 给出 2-4 条执行时需要持续观察的风险或依赖。',
+    '```',
+    '补充规则：',
+    '- 文档目标路径是 apps/web-docs/content/docs/tasks/handoff-next-up.md。',
+    '- 内容必须表现为动态下一步动作，而不是完整交接摘要或新的路线图。',
+    '- 首次出现的英文术语必须带中文解释。',
+    '- 如果章节标题是技术术语，章节第一句话必须用中文解释。',
+    '- 不要留下只有英文没有中文解释的术语。',
+    '',
+    `原始用户目标: ${input.goal}`,
+    '',
+    '已接受的 Handoff Summary 交接摘要：',
+    input.handoffSummaryArtifact,
+    '',
+    '上游参考：Product Goal 产品目标',
+    input.productGoalArtifact,
+    '',
+    '上游参考：Capability Map 能力地图',
+    input.capabilityMapArtifact,
+    '',
+    '上游参考：Feature Plan 功能规划',
+    input.featurePlanArtifact,
+    '',
+    '上游参考：MVP Scope MVP 范围',
+    input.mvpScopeArtifact,
+  ].join('\n')
+}
+
 function buildRealDocsWriteGuardPrompt(input: {
   goal: string
   logicalArtifactPath: string
@@ -1163,6 +1723,8 @@ function buildRealDocsWriteGuardPrompt(input: {
     '- product/vision.md 必须继续围绕 apps/oc-pi-cli、goal-to-docs、review-loop、interactive-workbench、agent-role-config 等主线。',
     '- capabilities/overview.mdx 必须继续是一级能力地图页面，而不是另一个产品介绍。',
     '- planning/mvp-features.md 必须继续同时承载 feature-plan 功能规划 与 mvp-scope MVP 范围 两个槽位语义。',
+    '- tasks/handoff-summary.md 必须继续是阶段性交接摘要页，包含 Summary、Confirmed Outputs、Recommended Next Actions、Open Questions。',
+    '- tasks/handoff-next-up.md 必须继续是动态下一步动作页，包含 Current Focus、Immediate Actions、Watch Items。',
     '只允许输出以下纯文本格式：',
     'CONFLICT: none 或 CONFLICT: warning 或 CONFLICT: blocking',
     'SUMMARY: 一句中文摘要',
@@ -1190,12 +1752,16 @@ function buildTimelineSummary(
   stageResult: ExecuteStageOutput,
   artifactMode: ArtifactMode,
 ): string {
-  if (stageResult.stageResult.realWriteGuard?.action === 'blocked') {
-    return `Blocked real write for ${stageResult.review.artifactSlotId} at ${stageResult.stageResult.logicalArtifactPath}: ${stageResult.stageResult.realWriteGuard.summary}`
+  const timelineArtifact = stageResult.stageResult.artifactDetails.find(
+    (artifact) => artifact.realWriteGuard?.action === 'blocked' || artifact.realWriteGuard?.action === 'confirmed-write',
+  )
+
+  if (timelineArtifact?.realWriteGuard?.action === 'blocked') {
+    return `Blocked real write for ${timelineArtifact.slotId} at ${timelineArtifact.logicalArtifactPath}: ${timelineArtifact.realWriteGuard.summary}`
   }
 
-  if (stageResult.stageResult.realWriteGuard?.action === 'confirmed-write') {
-    return `Wrote ${stageResult.review.artifactSlotId} to ${stageResult.stageResult.logicalArtifactPath} after confirmation`
+  if (timelineArtifact?.realWriteGuard?.action === 'confirmed-write') {
+    return `Wrote ${timelineArtifact.slotId} to ${timelineArtifact.logicalArtifactPath} after confirmation`
   }
 
   if (artifactMode === 'write') {
@@ -1332,7 +1898,20 @@ function canContinueAfterStage(stageResult: GoalStageExecutionResult): boolean {
 }
 
 function isRealWriteBlocked(stageResult: GoalStageExecutionResult): boolean {
-  return stageResult.realWriteGuard?.action === 'blocked'
+  return stageResult.artifactDetails.some(isRealWriteBlockedArtifact)
+}
+
+function resolveStageRealWriteGuard(
+  artifacts: ArtifactExecutionDetail[],
+): RealWriteGuardResult | undefined {
+  const blockedGuard = artifacts.find((artifact) => artifact.realWriteGuard?.action === 'blocked')?.realWriteGuard
+
+  if (blockedGuard) {
+    return blockedGuard
+  }
+
+  return artifacts.find((artifact) => artifact.realWriteGuard?.action === 'confirmed-write')?.realWriteGuard
+    ?? artifacts.find((artifact) => artifact.realWriteGuard?.action === 'direct-write')?.realWriteGuard
 }
 
 function summarizeDocumentForDisplay(content: string): string {
@@ -1550,6 +2129,47 @@ function evaluateStaticRealDocsConflict(input: {
         findings,
         '候选 MVP Features MVP 功能清单 当前产品功能锚点偏少，且出现了可疑的越界漂移信号。',
         'medium',
+      )
+    }
+  }
+
+  if (input.logicalArtifactPath === 'apps/web-docs/content/docs/tasks/handoff-summary.md') {
+    const summaryGroups = [
+      ['handoff summary', '交接摘要'],
+      ['summary', '当前交接摘要'],
+      ['confirmed outputs', '已确认产物'],
+      ['recommended next actions', '建议下一步动作'],
+      ['open questions', '待确认问题'],
+    ] satisfies string[][]
+    const summaryCount = countMatchedAnchorGroups(candidate, summaryGroups)
+    const retainedSummaryCount = countRetainedAnchorGroups(source, candidate, summaryGroups)
+
+    if (summaryCount < 4 || retainedSummaryCount < 2) {
+      productSignalStrength = 'weak'
+      addUniqueFinding(
+        findings,
+        '候选 Handoff Summary 交接摘要 没有继续保持固定摘要结构与交接职责锚点。',
+        summaryCount < 3 ? 'high' : 'medium',
+      )
+    }
+  }
+
+  if (input.logicalArtifactPath === 'apps/web-docs/content/docs/tasks/handoff-next-up.md') {
+    const nextUpGroups = [
+      ['handoff next up', '下一步指引'],
+      ['current focus', '当前焦点'],
+      ['immediate actions', '立即动作'],
+      ['watch items', '观察项'],
+    ] satisfies string[][]
+    const nextUpCount = countMatchedAnchorGroups(candidate, nextUpGroups)
+    const retainedNextUpCount = countRetainedAnchorGroups(source, candidate, nextUpGroups)
+
+    if (nextUpCount < 3 || retainedNextUpCount < 1) {
+      productSignalStrength = 'weak'
+      addUniqueFinding(
+        findings,
+        '候选 Handoff Next Up 下一步指引 没有继续保持动态下一步动作的固定结构与页面职责。',
+        nextUpCount < 2 ? 'high' : 'medium',
       )
     }
   }

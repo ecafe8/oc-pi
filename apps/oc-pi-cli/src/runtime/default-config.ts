@@ -87,6 +87,20 @@ export const DEFAULT_SLOT_DEFINITIONS: SlotDefinition[] = [
     defaultPath: 'apps/web-docs/content/docs/planning/mvp-features.md',
   },
   {
+    slotId: 'handoff-summary',
+    name: 'Handoff Summary',
+    description: '阶段性交接摘要文档落点',
+    kind: 'docs',
+    defaultPath: 'apps/web-docs/content/docs/tasks/handoff-summary.md',
+  },
+  {
+    slotId: 'handoff-next-up',
+    name: 'Handoff Next Up',
+    description: '动态下一步指引文档落点',
+    kind: 'docs',
+    defaultPath: 'apps/web-docs/content/docs/tasks/handoff-next-up.md',
+  },
+  {
     slotId: 'next-summary',
     name: 'Next Summary',
     description: '下一步摘要落点',
@@ -151,8 +165,9 @@ export const DEFAULT_GOAL_TO_DOCS_STAGES: GoalToDocsStageContract[] = [
   {
     stageId: 'handoff-summary',
     name: 'Handoff Summary',
-    inputArtifacts: ['feature-plan', 'mvp-scope'],
-    primaryOutputSlot: 'next-summary',
+    inputArtifacts: ['product-goal', 'capability-map', 'feature-plan', 'mvp-scope'],
+    primaryOutputSlot: 'handoff-summary',
+    additionalOutputSlots: ['handoff-next-up'],
     writerRoleId: 'doc-writer',
     reviewerRoleId: 'doc-reviewer',
     reviewRequired: true,

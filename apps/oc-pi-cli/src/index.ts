@@ -206,6 +206,22 @@ async function runGoalCommand(args: string[]): Promise<void> {
           reviewStatus: stage.review.status,
           reviewSummary: stage.review.summary,
           wroteArtifact: stage.wroteArtifact,
+          artifactDetails: stage.artifactDetails.map((artifact) => ({
+            slotId: artifact.slotId,
+            logicalArtifactPath: artifact.logicalArtifactPath,
+            resolvedArtifactAbsolutePath: artifact.resolvedArtifactAbsolutePath,
+            reviewStatus: artifact.review.status,
+            reviewSummary: artifact.review.summary,
+            wroteArtifact: artifact.wroteArtifact,
+            realWriteGuard: artifact.realWriteGuard
+              ? {
+                  conflictLevel: artifact.realWriteGuard.conflictLevel,
+                  summary: artifact.realWriteGuard.summary,
+                  findings: artifact.realWriteGuard.findings.map((finding) => finding.message),
+                  action: artifact.realWriteGuard.action,
+                }
+              : null,
+          })),
           realWriteGuard: stage.realWriteGuard
             ? {
                 conflictLevel: stage.realWriteGuard.conflictLevel,

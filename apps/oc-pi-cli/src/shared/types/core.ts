@@ -13,6 +13,8 @@ export type SlotId =
   | 'capability-map'
   | 'feature-plan'
   | 'mvp-scope'
+  | 'handoff-summary'
+  | 'handoff-next-up'
   | 'next-summary'
   | 'review-notes'
   | 'implementation-code'
