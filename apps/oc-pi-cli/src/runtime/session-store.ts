@@ -1,7 +1,8 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname } from 'node:path'
 
 import type { GoalToDocsRunRecord } from '@/planning/goal-to-docs/types.js'
+import { assertWithinCliRoot, resolveCliInternalPath } from '@/runtime/paths.js'
 import type { WorkbenchState } from '@/workbench/types.js'
 
 export interface RuntimeSessionRecord {
@@ -32,7 +33,7 @@ export class FileRuntimeSessionStore {
   }
 
   private get filePath(): string {
-    return join(this.workspaceRoot, '.oc-pi-cli', 'session.json')
+    return assertWithinCliRoot(resolveCliInternalPath('.oc-pi-cli', 'session.json'))
   }
 }
 

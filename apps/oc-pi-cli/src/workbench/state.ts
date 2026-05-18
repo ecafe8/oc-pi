@@ -1,4 +1,5 @@
 import type { GoalToDocsRunRecord } from "@/planning/goal-to-docs/types.js";
+import type { ArtifactMode } from "@/planning/goal-to-docs/run-mvp.js";
 import type {
   ReviewStatus,
   RoleId,
@@ -213,4 +214,23 @@ export function syncWorkbenchSessionFromGoalToDocsRun(state: WorkbenchState, run
       touchedFiles,
     },
   };
+}
+
+export function setWorkbenchExecutionBoundary(
+  state: WorkbenchState,
+  artifactMode: ArtifactMode,
+): WorkbenchState {
+  const executionBoundary = artifactMode === 'write'
+    ? 'workspace-docs'
+    : artifactMode === 'sandbox-write'
+      ? 'sandbox'
+      : 'preview'
+
+  return {
+    ...state,
+    execution: {
+      ...state.execution,
+      executionBoundary,
+    },
+  }
 }

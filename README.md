@@ -52,19 +52,22 @@ bun --filter oc-pi-cli run types:check
 其中：
 
 - `goal new <目标>` 是 preview 模式，只预览目标路径，不写文件；解析路径指向 `tests/sandbox`
-- `goal new --write-sandbox <目标>` 会把产物真实写入 `tests/sandbox/web-docs/content/...`，用于验证完整写盘流程但不触碰真实 docs
-- `goal new --write-docs <目标>` 才会把真实文档写入 `apps/web-docs/content/docs/...`
-- `--write-sandbox` 与 `--write-docs` 不能同时使用
-- 真实写入路径会被 `apps/oc-pi-cli/src/runtime/paths.ts` 限制在 `apps/web-docs` 内
-- 只有真实 `--write-docs` 会持久化 `.oc-pi-cli/session.json`；preview 与 sandbox write 不会写 runtime session
+- `goal new --write <目标>` 会请求写入产物：在 `development 开发阶段` 与 `test 测试阶段` 自动写入 `tests/sandbox/web-docs/content/...`；只有 `production 正式阶段` 才允许写入 `apps/web-docs/content/docs/...`
+- `OC_PI_RUNTIME_STAGE 运行阶段环境变量` 用于声明当前运行环境用途，而不是单纯表示 Node 构建模式：
+  - `development`：本地开发，`--write` 只写 sandbox
+  - `test`：测试/回归，`--write` 只写 sandbox
+  - `production`：正式打包后的受控运行阶段，`--write` 才允许进入真实 docs 写入流程
+- 所有真实写入路径会被 `apps/oc-pi-cli/src/runtime/paths.ts` 限制在 `apps/web-docs` 内
+- 所有 sandbox 写入路径会被限制在 `tests/sandbox` 内
+- 内部状态文件与凭据文件也必须先通过路径校验，避免越权修改错误目录或文件
+- 只有真实 workspace docs 写入会持久化 `.oc-pi-cli/session.json`；preview 与 sandbox write 不会写 runtime session
 
 示例：
 
 ```bash
 bun run src/index.ts goal new "两阶段 preview 仅预览路径"
-bun run src/index.ts goal new --write-sandbox "两阶段写入 sandbox 验证完整流程"
-bun run src/index.ts goal new --write-sandbox "构建一个本地优先的 AI harness 人工智能编排框架，让使用者可以围绕目标、任务、代码与文档进行持续协作，而不是只进行一次性对话生成。"
-bun run src/index.ts goal new --write-docs "两阶段真实写入 docs"
+bun run src/index.ts goal new --write "两阶段写入；开发与测试默认落 sandbox"
+OC_PI_RUNTIME_STAGE=production bun run src/index.ts goal new --write "两阶段正式写入 docs"
 ```
 
 ### `apps/web-docs`

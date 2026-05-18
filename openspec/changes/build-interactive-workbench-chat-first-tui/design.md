@@ -18,7 +18,7 @@ Pi 侧已经提供了足够的 TUI 基础设施：`TUI`、`ProcessTerminal`、`E
 **Non-Goals:**
 - 不做自由多窗格布局、复杂 diff 预览器、artifact 原地编辑、多会话分支或复杂按钮系统。
 - 不重写 `goal-to-docs` 四阶段执行引擎。
-- 不把 `--write-docs 真实文档写入模式` 作为第一版 TUI 默认主路径。
+- 不把 `workspace docs 真实文档写入路径` 作为第一版 TUI 默认主路径；开发与测试下的 `--write` 默认应进入 sandbox。
 
 ## Decisions
 
@@ -66,7 +66,7 @@ Pi 侧已经提供了足够的 TUI 基础设施：`TUI`、`ProcessTerminal`、`E
 - 当前真实 docs 写入已有 guard 保护，但不适合作为工作台第一版默认主路径。
 - 先稳定用户交互闭环，再扩真实写入确认链更稳妥。
 
-备选方案：第一版直接开放 `--write-docs` 主路径。
+备选方案：第一版直接开放真实 workspace docs 写入主路径。
 - 不采纳原因：把人机交互问题与真实写入治理问题混在一起，定位成本更高。
 
 ### Decision 5: 单独保留 TUI CLI 入口接线任务

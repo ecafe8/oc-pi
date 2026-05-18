@@ -344,10 +344,11 @@ First Version Constraints 第一版约束用于控制范围，避免一开始生
 
 Validation Boundary 验证边界用于说明当前实现如何在不污染真实 docs 真源的前提下验证 `goal-to-docs 目标到文档` 的稳定性。
 
-- 日常稳定性验证优先使用 `preview 预览模式` 与 `--write-sandbox 沙盒写入模式`
+- 日常稳定性验证优先使用 `preview 预览模式` 与 `--write 写入模式` 在 `development 开发阶段` / `test 测试阶段` 下的 sandbox 写入
 - `preview 预览模式` 只返回结构化结果，不落盘真实 docs
-- `--write-sandbox 沙盒写入模式` 只写入 `tests/sandbox/...`，用于观察失败样本与稳定样本
-- `--write-docs 真实文档写入模式` 只用于明确需要更新真源时，并受 real-write guard 真实写入守卫保护
+- `--write 写入模式` 在 `OC_PI_RUNTIME_STAGE 运行阶段环境变量` 为 `development` 或 `test` 时只写入 `tests/sandbox/...`，用于观察失败样本与稳定样本
+- `--write 写入模式` 只有在 `OC_PI_RUNTIME_STAGE=production` 时才允许写入真实 docs 真源，并受 real-write guard 真实写入守卫保护
+- `OC_PI_RUNTIME_STAGE 运行阶段环境变量` 的用途是声明当前运行实例是否处于本地开发、测试回归或正式打包后的受控运行阶段，而不是替代普通构建变量
 
 ## Open Questions 待定问题
 

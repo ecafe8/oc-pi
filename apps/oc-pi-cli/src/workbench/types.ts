@@ -66,7 +66,7 @@ export interface WorkbenchExecutionState {
   currentAction: string;
   latestAction: string;
   touchedFiles: string[];
-  executionBoundary: 'preview' | 'sandbox' | 'write-docs';
+  executionBoundary: 'preview' | 'sandbox' | 'workspace-docs';
 }
 
 export interface WorkbenchStatusBarState {

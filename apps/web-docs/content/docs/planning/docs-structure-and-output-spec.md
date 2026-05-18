@@ -228,8 +228,9 @@ Current Default Docs Outputs 当前默认文档输出用于给出当前阶段推
 Validation Boundary 验证边界用于说明当前 docs 输出规范如何配合 `goal-to-docs 目标到文档` 的稳定性验证。
 
 - 预览验证优先使用 `preview 预览模式`，该模式返回解析后的输出信息，但不写入真实 docs。
-- 需要观察生成产物时优先使用 `--write-sandbox 沙盒写入模式`，写入位置固定在 `tests/sandbox/web-docs/content/docs/...`。
-- `--write-docs 真实文档写入模式` 只用于明确更新真源时，且必须接受 real-write guard 真实写入守卫的确认或阻断。
+- 需要观察生成产物时优先使用 `--write 写入模式`，并在 `OC_PI_RUNTIME_STAGE 运行阶段环境变量` 为 `development` 或 `test` 时将写入位置固定在 `tests/sandbox/web-docs/content/docs/...`。
+- `--write 写入模式` 只有在 `OC_PI_RUNTIME_STAGE=production` 时才允许更新真实 docs 真源，且必须接受 real-write guard 真实写入守卫的确认或阻断。
+- 所有文件写入、修改、删除动作都必须先通过路径校验，只允许落在当前模式对应的允许目录中，避免越权写入错误目录或错误文件。
 - 因此，日常稳定性回归不应把真实 docs 写入作为默认完成条件。
 
 ## Relation to Other Docs 与其他文档的关系

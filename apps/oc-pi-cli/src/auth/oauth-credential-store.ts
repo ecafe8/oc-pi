@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, normalize, resolve, sep } from 'node:path'
 
 import type { OAuthCredentialMap, OAuthCredentials } from '@/provider-adapters/types.js'
 
@@ -18,7 +18,7 @@ const DEFAULT_STORE_PATH = join(
 )
 
 export class FileOAuthCredentialStore implements OAuthCredentialStore {
-  public constructor(private readonly filePath: string = DEFAULT_STORE_PATH) {}
+  public constructor(private readonly _filePath: string = DEFAULT_STORE_PATH) {}
 
   public async readAll(): Promise<OAuthCredentialMap> {
     try {
@@ -55,6 +55,10 @@ export class FileOAuthCredentialStore implements OAuthCredentialStore {
     await mkdir(dirname(this.filePath), { recursive: true })
     await writeFile(this.filePath, `${JSON.stringify(next, null, 2)}\n`, 'utf8')
   }
+
+  private get filePath(): string {
+    return assertWithinOAuthConfigRoot(this._filePath)
+  }
 }
 
 function isMissingFileError(error: unknown): error is NodeJS.ErrnoException {
@@ -81,4 +85,15 @@ function isOAuthCredentials(value: unknown): value is OAuthCredentials {
     typeof candidate.access === 'string' &&
     typeof candidate.expires === 'number'
   )
+}
+
+function assertWithinOAuthConfigRoot(path: string): string {
+  const configRoot = normalize(resolve(process.env.XDG_CONFIG_HOME ?? DEFAULT_CONFIG_DIR))
+  const normalizedPath = normalize(resolve(path))
+
+  if (!normalizedPath.startsWith(`${configRoot}${sep}`) && normalizedPath !== configRoot) {
+    throw new Error(`Refusing to access OAuth credential store outside config root: ${normalizedPath}`)
+  }
+
+  return normalizedPath
 }

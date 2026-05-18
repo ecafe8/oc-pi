@@ -12,7 +12,7 @@ import {
   runGoalToDocsMvp,
 } from '@/planning/goal-to-docs/run-mvp.js'
 import { createDefaultWorkbenchState } from '@/runtime/default-config.js'
-import { getCliRootPath } from '@/runtime/paths.js'
+import { getCliRootPath, resolveRuntimeStage, RUNTIME_STAGE_ENV } from '@/runtime/paths.js'
 import { FileRuntimeSessionStore } from '@/runtime/session-store.js'
 import { startWorkbench } from '@/workbench/index.js'
 import {
@@ -23,7 +23,6 @@ import {
 const SUPPORTED_AUTH_COMMANDS = ['login', 'api-key', 'status'] as const
 const DEFAULT_PROMPT_PROVIDER = 'github-copilot'
 const DEFAULT_PROMPT_MODEL_ID = 'gpt-5-mini'
-const REAL_DOCS_WRITE_ENV = 'OC_PI_ENABLE_REAL_DOCS_WRITE'
 
 export async function main(): Promise<void> {
   const [scope, ...args] = process.argv.slice(2)
@@ -159,17 +158,18 @@ async function runPromptCommand(args: string[]): Promise<void> {
 }
 
 async function runGoalCommand(args: string[]): Promise<void> {
-  const writesDocs = args.includes('--write-docs')
-  const writesSandbox = args.includes('--write-sandbox')
+  const shouldWrite = args.includes('--write')
+  const legacyWritesDocs = args.includes('--write-docs')
+  const legacyWritesSandbox = args.includes('--write-sandbox')
 
-  if (writesDocs && writesSandbox) {
-    throw new Error('Conflicting goal write flags. Use either --write-docs or --write-sandbox')
+  if (legacyWritesDocs || legacyWritesSandbox) {
+    throw new Error('Legacy flags --write-docs and --write-sandbox have been removed. Use --write only.')
   }
 
-  const requestedArtifactMode = resolveArtifactMode({ writesDocs, writesSandbox })
+  const requestedArtifactMode = resolveArtifactMode({ shouldWrite })
   const artifactMode = resolveEffectiveArtifactMode(requestedArtifactMode)
   const filteredArgs = args.filter(
-    (arg) => arg !== '--write-docs' && arg !== '--write-sandbox',
+    (arg) => arg !== '--write',
   )
   const [command, ...goalParts] = filteredArgs
 
@@ -193,7 +193,7 @@ async function runGoalCommand(args: string[]): Promise<void> {
 
   if (requestedArtifactMode === 'write' && artifactMode !== 'write') {
     console.log(
-      `[write-mode] real docs write disabled, redirected to sandbox. Set ${REAL_DOCS_WRITE_ENV}=true to enable apps/web-docs writes.`,
+      `[write-mode] runtime stage is ${resolveRuntimeStage()}, redirected to sandbox. Set ${RUNTIME_STAGE_ENV}=production in packaged runtime to enable apps/web-docs writes.`,
     )
   }
 
@@ -311,23 +311,18 @@ function printUsage(): void {
   console.log('Usage: bun run src/index.ts auth <login|api-key|status> <provider>')
   console.log('Usage: bun run src/index.ts prompt <message>')
   console.log('Default goal preview target: tests/sandbox/web-docs/content/... (no files written)')
-  console.log('Sandbox goal write target: tests/sandbox/web-docs/content/... (--write-sandbox)')
-  console.log(`Real goal write target: apps/web-docs/content/docs/... (--write-docs, requires ${REAL_DOCS_WRITE_ENV}=true)`) 
-  console.log('Usage: bun run src/index.ts goal new [--write-sandbox|--write-docs] <goal>')
+  console.log(`Goal write target with --write: tests/sandbox/... in development/test, apps/web-docs/... only when ${RUNTIME_STAGE_ENV}=production`) 
+  console.log(`Environment variable: ${RUNTIME_STAGE_ENV} controls runtime stage. Use development/test during local work; only packaged production runtime should use production.`)
+  console.log('Usage: bun run src/index.ts goal new [--write] <goal>')
   console.log('Usage: bun run src/index.ts status show')
   console.log('Usage: bun run src/index.ts review latest')
   console.log('Usage: bun run src/index.ts workbench [start]')
 }
 
 function resolveArtifactMode(input: {
-  writesDocs: boolean
-  writesSandbox: boolean
+  shouldWrite: boolean
 }): ArtifactMode {
-  if (input.writesDocs) {
-    return 'write'
-  }
-
-  if (input.writesSandbox) {
+  if (input.shouldWrite) {
     return 'sandbox-write'
   }
 
@@ -336,16 +331,14 @@ function resolveArtifactMode(input: {
 
 function resolveEffectiveArtifactMode(artifactMode: ArtifactMode): ArtifactMode {
   if (artifactMode !== 'write') {
+    if (artifactMode === 'sandbox-write') {
+      return resolveRuntimeStage() === 'production' ? 'write' : 'sandbox-write'
+    }
+
     return artifactMode
   }
 
-  return isRealDocsWriteEnabled() ? 'write' : 'sandbox-write'
-}
-
-function isRealDocsWriteEnabled(): boolean {
-  const value = process.env[REAL_DOCS_WRITE_ENV]?.trim().toLowerCase()
-
-  return value === '1' || value === 'true' || value === 'yes'
+  return resolveRuntimeStage() === 'production' ? 'write' : 'sandbox-write'
 }
 
 async function confirmRealDocsWrite(

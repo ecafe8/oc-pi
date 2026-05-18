@@ -32,7 +32,7 @@
 
 - [ ] 6.1 根据 `apps/web-docs/content/docs/tasks/dev-tasks/05-workbench-right-pane-project-plan-execution.md`，在右侧信息区展示当前项目摘要、计划步骤状态与执行过程摘要。
 - [ ] 6.2 执行结束后在右侧信息区展示至少一条结果文件路径，并包含 review / guard 的简短状态摘要。
-- [ ] 6.3 让右侧信息区持续显示当前执行边界，例如 `preview`、`sandbox`、`write-docs`。
+- [ ] 6.3 让右侧信息区持续显示当前执行边界，例如 `preview`、`sandbox`、`workspace-docs`。
 
 ## 7. 斜杠命令与验证
 

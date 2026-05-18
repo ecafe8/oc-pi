@@ -100,7 +100,7 @@ async function runSandboxChecks(): Promise<void> {
 
 async function runSandboxStableCheck(): Promise<void> {
   const stableGoal = await readFixture("stable-goal.txt");
-  const stableResult = await runGoalCommand(stableGoal, "--write-sandbox");
+  const stableResult = await runGoalCommand(stableGoal, "--write");
 
   if (stableResult.mode !== "sandbox-write") {
     throw new Error(`Expected sandbox-write mode, got ${stableResult.mode}`);
@@ -137,7 +137,7 @@ async function readFixture(fileName: string): Promise<string> {
   return content.trim();
 }
 
-async function runGoalCommand(goal: string, modeFlag?: "--write-sandbox"): Promise<GoalCommandResult> {
+async function runGoalCommand(goal: string, modeFlag?: "--write"): Promise<GoalCommandResult> {
   const args = ["bun", "run", "src/index.ts", "goal", "new"];
 
   if (modeFlag) {

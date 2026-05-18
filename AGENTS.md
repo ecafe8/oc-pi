@@ -53,5 +53,6 @@
 - Focused CLI checks:
   - `bun --filter oc-pi-cli run dev`
   - `bun --filter oc-pi-cli run types:check`
-- `goal new ... --write-docs` writes real artifacts into `apps/web-docs`; preview mode writes into `tests/sandbox`.
-- Path guards in `apps/oc-pi-cli/src/runtime/paths.ts` intentionally refuse writes outside `apps/web-docs` for real docs output.
+- `goal new ... --write` requests artifact writes; in `development/test` it writes into `tests/sandbox`, and only packaged `production` runtime may write into `apps/web-docs`.
+- `OC_PI_RUNTIME_STAGE` declares runtime purpose: `development` and `test` force sandbox writes, `production` enables real docs writes.
+- Path guards in `apps/oc-pi-cli/src/runtime/paths.ts` intentionally refuse writes outside allowed roots for real docs output, sandbox output, and internal state files.

@@ -49,7 +49,7 @@ apps/oc-pi-cli/src/planning/goal-to-docs/
 
 - 当前 `apps/oc-pi-cli/src/workbench/controller/index.ts` 与 `apps/oc-pi-cli/src/workbench/state.ts` 已有骨架；本任务应在其基础上补齐 plan-first 控制流，而不是重新创建平行模块
 - 第一版优先打通 `preview 预览模式` 与 `sandbox 沙盒模式`
-- 默认不把 `--write-docs 真实文档写入模式` 作为 TUI 主路径
+- 默认不把 `workspace docs 真实文档写入路径` 作为 TUI 主路径；开发与测试下的 `--write` 应自动落到 sandbox
 - 执行前必须清晰展示当前边界与计划步骤
 - 当前 `goal-to-docs 目标到文档` 已是四阶段闭环：`goal-framing`、`capability-breakdown`、`feature-planning`、`handoff-summary`
 - 执行过程展示必须覆盖 Stage 4 的 `handoff-summary 交接摘要` 主输出与 `handoff-next-up 下一步指引` 附加输出，而不是只停留在 Stage 3 语义

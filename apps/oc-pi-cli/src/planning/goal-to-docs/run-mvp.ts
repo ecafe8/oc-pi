@@ -21,8 +21,10 @@ import {
 import {
   assertWithinTestSandbox,
   assertWithinWorkspaceDocs,
+  resolveRuntimeStage,
   resolveTestSandboxPath,
   resolveWorkspacePath,
+  RUNTIME_STAGE_ENV,
 } from '@/runtime/paths.js'
 import type { ReviewFinding, ReviewResult } from '@/shared/types/review.js'
 import type { RuntimeStatus, SlotId } from '@/shared/types/core.js'
@@ -37,6 +39,7 @@ import {
 } from '@/workbench/controller/index.js'
 import {
   addTimelineItem,
+  setWorkbenchExecutionBoundary,
   setWorkbenchInspectorExecutionStatus,
   setWorkbenchRuntimeStatus,
 } from '@/workbench/state.js'
@@ -59,7 +62,6 @@ export interface RunGoalToDocsMvpResult {
 }
 
 export type ArtifactMode = 'preview' | 'sandbox-write' | 'write'
-export const REAL_DOCS_WRITE_ENV = 'OC_PI_ENABLE_REAL_DOCS_WRITE'
 
 export type RealDocsConflictLevel = 'none' | 'warning' | 'blocking'
 
@@ -118,8 +120,9 @@ export async function runGoalToDocsMvp(
   const artifactMode = resolveEffectiveArtifactMode(input.artifactMode ?? 'preview')
   const shouldWriteArtifacts = artifactMode !== 'preview'
   const initialState = createDefaultWorkbenchState(input.cliRoot)
+  const preparedState = setWorkbenchExecutionBoundary(initialState, artifactMode)
   const goalResult = handleGoalNew({
-    state: initialState,
+    state: preparedState,
     goal: input.goal,
   })
   const firstStage = DEFAULT_GOAL_TO_DOCS_STAGES[0]
@@ -512,13 +515,7 @@ function resolveEffectiveArtifactMode(artifactMode: ArtifactMode): ArtifactMode 
     return artifactMode
   }
 
-  return isRealDocsWriteEnabled() ? 'write' : 'sandbox-write'
-}
-
-function isRealDocsWriteEnabled(): boolean {
-  const value = process.env[REAL_DOCS_WRITE_ENV]?.trim().toLowerCase()
-
-  return value === '1' || value === 'true' || value === 'yes'
+  return resolveRuntimeStage() === 'production' ? 'write' : 'sandbox-write'
 }
 
 interface ExecuteStageInput {

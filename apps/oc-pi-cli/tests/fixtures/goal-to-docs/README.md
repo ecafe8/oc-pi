@@ -20,7 +20,7 @@
 - `bun run goal-to-docs:check:preview:adversarial`
   - 只运行 adversarial preview 样本，适合快速检查失败拦截路径。
 - `bun run goal-to-docs:check:sandbox`
-  - 运行 stable 的 `--write-sandbox` 样本，并确认输出仍落在 `tests/sandbox/...`。
+  - 运行 stable 的 `--write` 样本，并确认在默认运行阶段下输出仍落在 `tests/sandbox/...`。
 - `bun run goal-to-docs:check:sandbox:stable`
   - 只运行 stable 的 sandbox 样本，适合日常回归。
 - `bun run goal-to-docs:check`
@@ -31,5 +31,5 @@
 ## Notes
 
 - 样本文本应保持尽量稳定，不要频繁改动。
-- 默认验证边界是 `preview 预览模式` 与 `--write-sandbox 沙盒写入模式`，不把 `--write-docs 真实文档写入模式` 纳入日常回归。
+- 默认验证边界是 `preview 预览模式` 与 `--write 写入模式` 在 `development/test` 下的 sandbox 行为，不把 `production` 真实写入作为日常回归前提。
 - 因为检查会触发真实模型调用，完整命令可能耗时较长；日常可优先使用拆分后的单样本命令。
