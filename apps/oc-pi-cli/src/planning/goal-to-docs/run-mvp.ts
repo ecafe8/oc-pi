@@ -59,6 +59,7 @@ export interface RunGoalToDocsMvpResult {
 }
 
 export type ArtifactMode = 'preview' | 'sandbox-write' | 'write'
+export const REAL_DOCS_WRITE_ENV = 'OC_PI_ENABLE_REAL_DOCS_WRITE'
 
 export type RealDocsConflictLevel = 'none' | 'warning' | 'blocking'
 
@@ -114,7 +115,7 @@ export async function runGoalToDocsMvp(
   const agentBridge = new PiModelAgentBridge()
   const credentialStore = new FileOAuthCredentialStore()
   const apiKeyCache = new Map<string, string>()
-  const artifactMode = input.artifactMode ?? 'preview'
+  const artifactMode = resolveEffectiveArtifactMode(input.artifactMode ?? 'preview')
   const shouldWriteArtifacts = artifactMode !== 'preview'
   const initialState = createDefaultWorkbenchState(input.cliRoot)
   const goalResult = handleGoalNew({
@@ -504,6 +505,20 @@ export async function runGoalToDocsMvp(
     wroteArtifact: stages.some((stage) => stage.wroteArtifact),
     blockedByRealWriteGuard: stages.some(isRealWriteBlocked),
   }
+}
+
+function resolveEffectiveArtifactMode(artifactMode: ArtifactMode): ArtifactMode {
+  if (artifactMode !== 'write') {
+    return artifactMode
+  }
+
+  return isRealDocsWriteEnabled() ? 'write' : 'sandbox-write'
+}
+
+function isRealDocsWriteEnabled(): boolean {
+  const value = process.env[REAL_DOCS_WRITE_ENV]?.trim().toLowerCase()
+
+  return value === '1' || value === 'true' || value === 'yes'
 }
 
 interface ExecuteStageInput {

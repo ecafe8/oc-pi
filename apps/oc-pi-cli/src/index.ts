@@ -14,6 +14,7 @@ import {
 import { createDefaultWorkbenchState } from '@/runtime/default-config.js'
 import { getCliRootPath } from '@/runtime/paths.js'
 import { FileRuntimeSessionStore } from '@/runtime/session-store.js'
+import { startWorkbench } from '@/workbench/index.js'
 import {
   handleReviewLatest,
   handleStatusShow,
@@ -22,6 +23,7 @@ import {
 const SUPPORTED_AUTH_COMMANDS = ['login', 'api-key', 'status'] as const
 const DEFAULT_PROMPT_PROVIDER = 'github-copilot'
 const DEFAULT_PROMPT_MODEL_ID = 'gpt-5-mini'
+const REAL_DOCS_WRITE_ENV = 'OC_PI_ENABLE_REAL_DOCS_WRITE'
 
 export async function main(): Promise<void> {
   const [scope, ...args] = process.argv.slice(2)
@@ -48,6 +50,11 @@ export async function main(): Promise<void> {
 
   if (scope === 'review') {
     await runReviewCommand(args)
+    return
+  }
+
+  if (scope === 'workbench') {
+    await runWorkbenchCommand(args)
     return
   }
 
@@ -159,7 +166,8 @@ async function runGoalCommand(args: string[]): Promise<void> {
     throw new Error('Conflicting goal write flags. Use either --write-docs or --write-sandbox')
   }
 
-  const artifactMode = resolveArtifactMode({ writesDocs, writesSandbox })
+  const requestedArtifactMode = resolveArtifactMode({ writesDocs, writesSandbox })
+  const artifactMode = resolveEffectiveArtifactMode(requestedArtifactMode)
   const filteredArgs = args.filter(
     (arg) => arg !== '--write-docs' && arg !== '--write-sandbox',
   )
@@ -183,6 +191,12 @@ async function runGoalCommand(args: string[]): Promise<void> {
     confirmRealWrite: artifactMode === 'write' ? confirmRealDocsWrite : undefined,
   })
 
+  if (requestedArtifactMode === 'write' && artifactMode !== 'write') {
+    console.log(
+      `[write-mode] real docs write disabled, redirected to sandbox. Set ${REAL_DOCS_WRITE_ENV}=true to enable apps/web-docs writes.`,
+    )
+  }
+
   if (artifactMode === 'write' && !result.blockedByRealWriteGuard) {
     await sessionStore.write({
       workbenchState: result.workbenchState,
@@ -194,6 +208,7 @@ async function runGoalCommand(args: string[]): Promise<void> {
     JSON.stringify(
       {
         command: 'goal.new',
+        requestedMode: requestedArtifactMode,
         mode: artifactMode,
         acceptedGoal: goal,
         stages: result.stages.map((stage) => ({
@@ -274,6 +289,18 @@ async function runReviewCommand(args: string[]): Promise<void> {
   console.log(JSON.stringify(result.command, null, 2))
 }
 
+async function runWorkbenchCommand(args: string[]): Promise<void> {
+  const [command] = args
+
+  if (command && command !== 'start') {
+    throw new Error(`Unsupported workbench command: ${command}. Expected: start`)
+  }
+
+  await startWorkbench({
+    workspacePath: getCliRootPath(),
+  })
+}
+
 function isSupportedAuthCommand(
   value: string | undefined,
 ): value is (typeof SUPPORTED_AUTH_COMMANDS)[number] {
@@ -285,10 +312,11 @@ function printUsage(): void {
   console.log('Usage: bun run src/index.ts prompt <message>')
   console.log('Default goal preview target: tests/sandbox/web-docs/content/... (no files written)')
   console.log('Sandbox goal write target: tests/sandbox/web-docs/content/... (--write-sandbox)')
-  console.log('Real goal write target: apps/web-docs/content/docs/... (--write-docs)')
+  console.log(`Real goal write target: apps/web-docs/content/docs/... (--write-docs, requires ${REAL_DOCS_WRITE_ENV}=true)`) 
   console.log('Usage: bun run src/index.ts goal new [--write-sandbox|--write-docs] <goal>')
   console.log('Usage: bun run src/index.ts status show')
   console.log('Usage: bun run src/index.ts review latest')
+  console.log('Usage: bun run src/index.ts workbench [start]')
 }
 
 function resolveArtifactMode(input: {
@@ -304,6 +332,20 @@ function resolveArtifactMode(input: {
   }
 
   return 'preview'
+}
+
+function resolveEffectiveArtifactMode(artifactMode: ArtifactMode): ArtifactMode {
+  if (artifactMode !== 'write') {
+    return artifactMode
+  }
+
+  return isRealDocsWriteEnabled() ? 'write' : 'sandbox-write'
+}
+
+function isRealDocsWriteEnabled(): boolean {
+  const value = process.env[REAL_DOCS_WRITE_ENV]?.trim().toLowerCase()
+
+  return value === '1' || value === 'true' || value === 'yes'
 }
 
 async function confirmRealDocsWrite(

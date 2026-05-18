@@ -10,8 +10,12 @@ import type {
 } from "@/shared/types/core.js";
 import type { ReviewFinding } from "@/shared/types/review.js";
 import type {
+  WorkbenchContextState,
+  WorkbenchExecutionState,
   TimelineItem,
   WorkbenchInspectorState,
+  WorkbenchPlanStep,
+  WorkbenchPlanState,
   WorkbenchReviewState,
   WorkbenchSessionState,
   WorkbenchState,
@@ -55,6 +59,31 @@ export function createWorkbenchReviewState(): WorkbenchReviewState {
   };
 }
 
+export function createWorkbenchContextState(): WorkbenchContextState {
+  return {
+    currentTokens: 0,
+    maxTokens: 0,
+    usagePercent: 0,
+    modelId: 'github-copilot/gpt-5-mini',
+    appVersion: '0.0.0',
+  }
+}
+
+export function createWorkbenchPlanState(): WorkbenchPlanState {
+  return {
+    steps: [],
+  }
+}
+
+export function createWorkbenchExecutionState(): WorkbenchExecutionState {
+  return {
+    currentAction: 'waiting for input',
+    latestAction: 'workbench created',
+    touchedFiles: [],
+    executionBoundary: 'preview',
+  }
+}
+
 export function createWorkbenchStatusBarState(): WorkbenchStatusBarState {
   return {
     runtimeStatus: "idle",
@@ -68,7 +97,10 @@ export function createWorkbenchState(input: CreateWorkbenchStateInput): Workbenc
     timeline: {
       items: [],
     },
+    context: createWorkbenchContextState(),
     inspector: createWorkbenchInspectorState(),
+    plan: createWorkbenchPlanState(),
+    execution: createWorkbenchExecutionState(),
     review: createWorkbenchReviewState(),
     statusBar: createWorkbenchStatusBarState(),
   };
@@ -86,6 +118,10 @@ export function addTimelineItem(state: WorkbenchState, item: TimelineItem): Work
 export function setWorkbenchRuntimeStatus(state: WorkbenchState, runtimeStatus: RuntimeStatus): WorkbenchState {
   return {
     ...state,
+    inspector: {
+      ...state.inspector,
+      lastExecutionStatus: runtimeStatus,
+    },
     statusBar: {
       ...state.statusBar,
       runtimeStatus,
@@ -128,6 +164,26 @@ export function setWorkbenchReviewState(
 export function syncWorkbenchSessionFromGoalToDocsRun(state: WorkbenchState, run: GoalToDocsRunRecord): WorkbenchState {
   const currentStage = run.stages.find((stage) => stage.stageId === run.currentStageId);
 
+  const touchedFiles = currentStage?.resolvedTargets.map((target) => target.path) ?? []
+
+  const planSteps: WorkbenchPlanStep[] = run.stages.map((stage) => {
+    let status: WorkbenchPlanStep['status'] = 'pending'
+
+    if (stage.status === 'accepted') {
+      status = 'done'
+    } else if (stage.stageId === run.currentStageId && stage.status === 'running') {
+      status = 'running'
+    } else if (stage.status === 'blocked') {
+      status = 'blocked'
+    }
+
+    return {
+      label: stage.stageId,
+      status,
+      summary: stage.reviewSummary,
+    }
+  })
+
   return {
     ...state,
     session: {
@@ -144,6 +200,17 @@ export function syncWorkbenchSessionFromGoalToDocsRun(state: WorkbenchState, run
         currentStage?.additionalOutputSlots ?? state.inspector.additionalResolvedSlotIds,
       resolvedTargets: currentStage?.resolvedTargets ?? state.inspector.resolvedTargets,
       blockingIssues: currentStage?.blockingIssues ?? state.inspector.blockingIssues,
+    },
+    plan: {
+      steps: planSteps,
+    },
+    execution: {
+      ...state.execution,
+      currentAction: currentStage
+        ? `current stage: ${currentStage.stageId}`
+        : state.execution.currentAction,
+      latestAction: currentStage?.reviewSummary ?? state.execution.latestAction,
+      touchedFiles,
     },
   };
 }

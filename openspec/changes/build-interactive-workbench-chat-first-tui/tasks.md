@@ -1,14 +1,14 @@
 ## 1. 工作台状态模型
 
-- [ ] 1.1 根据 `apps/web-docs/content/docs/tasks/dev-tasks/01-workbench-chat-state-model.md`，为 `apps/oc-pi-cli/src/workbench/types.ts` 与 `state.ts` 补齐 `context 上下文`、`plan 执行计划`、`execution 执行过程` 三组字段。
-- [ ] 1.2 在 `apps/oc-pi-cli/src/shared/types/core.ts` 或等价类型文件中补齐第一版工作台所需状态集合，至少覆盖 `thinking`、`waiting-user`、`reviewing`、`blocked`、`completed`。
-- [ ] 1.3 让默认状态创建函数可以返回完整的第一版 chat-first TUI 初始状态。
+- [x] 1.1 根据 `apps/web-docs/content/docs/tasks/dev-tasks/01-workbench-chat-state-model.md`，为 `apps/oc-pi-cli/src/workbench/types.ts` 与 `state.ts` 补齐 `context 上下文`、`plan 执行计划`、`execution 执行过程` 三组字段。
+- [x] 1.2 在 `apps/oc-pi-cli/src/shared/types/core.ts` 或等价类型文件中补齐第一版工作台所需状态集合，至少覆盖 `thinking`、`waiting-user`、`reviewing`、`blocked`、`completed`。
+- [x] 1.3 让默认状态创建函数可以返回完整的第一版 chat-first TUI 初始状态。
 
 ## 2. 展示适配层
 
-- [ ] 2.1 根据 `apps/web-docs/content/docs/tasks/dev-tasks/02-workbench-chat-presenters.md`，扩展 `apps/oc-pi-cli/src/workbench/presenters/`，输出顶部状态条所需字段：模型、context 使用量、版本号、模式、总状态。
-- [ ] 2.2 为左侧聊天区输出稳定消息展示字段，至少包含消息类型、摘要、时间与流式状态位。
-- [ ] 2.3 为右侧信息区输出 `project info 项目信息`、`plan 执行计划`、`execution 执行过程` 三组摘要字段，避免 views 视图层自行拼接。
+- [x] 2.1 根据 `apps/web-docs/content/docs/tasks/dev-tasks/02-workbench-chat-presenters.md`，扩展 `apps/oc-pi-cli/src/workbench/presenters/`，输出顶部状态条所需字段：模型、context 使用量、版本号、模式、总状态。
+- [x] 2.2 为左侧聊天区输出稳定消息展示字段，至少包含消息类型、摘要、时间与流式状态位。
+- [x] 2.3 为右侧信息区输出 `project info 项目信息`、`plan 执行计划`、`execution 执行过程` 三组摘要字段，避免 views 视图层自行拼接。
 
 ## 3. Pi TUI 外壳布局
 

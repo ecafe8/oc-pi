@@ -8,7 +8,7 @@
     "paths": {
       "@/*": ["src/*"]
     },
-    "rootDir": "src"
+    "rootDir": "."
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"]
 }

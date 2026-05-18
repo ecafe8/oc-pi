@@ -38,7 +38,16 @@ export type StageStatus =
 
 export type ReviewStatus = 'accepted' | 'changes-requested'
 
-export type RuntimeStatus = 'idle' | 'running' | 'success' | 'failed'
+export type RuntimeStatus =
+  | 'idle'
+  | 'thinking'
+  | 'waiting-user'
+  | 'running'
+  | 'reviewing'
+  | 'blocked'
+  | 'completed'
+  | 'success'
+  | 'failed'
 
 export type WriteMode = 'overwrite' | 'append' | 'merge'
 
