@@ -67,6 +67,13 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
 
       try {
         if (trimmed.startsWith('/')) {
+          const viewCommand = rootView.handleViewCommand(trimmed)
+
+          if (viewCommand.handled) {
+            if (viewCommand.message) {
+              state = appendSystemMessage(state, viewCommand.message)
+            }
+          } else {
           const result = await handleWorkbenchCommand({
             state,
             input: trimmed,
@@ -77,6 +84,7 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
           session = {
             workbenchState: state,
             latestRun: result.latestRun ?? session?.latestRun,
+          }
           }
         } else {
           const result = await handleChatInput({

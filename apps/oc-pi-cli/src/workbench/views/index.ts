@@ -16,6 +16,7 @@ import type { WorkbenchState } from '@/workbench/types.js'
 
 const MIN_INFO_PANE_WIDTH = 28
 const INFO_PANE_RATIO = 0.34
+type ScrollPane = 'chat' | 'thinking' | 'info'
 
 export interface WorkbenchRootViewOptions {
   tui: TUI
@@ -24,10 +25,18 @@ export interface WorkbenchRootViewOptions {
   onSubmit: (value: string) => void
 }
 
+export interface WorkbenchViewCommandResult {
+  handled: boolean
+  message?: string
+}
+
 export class WorkbenchRootView implements Component, Focusable {
   private readonly editor: Editor
   private state: WorkbenchState
+  private chatScrollOffset = 0
+  private thinkingScrollOffset = 0
   private infoScrollOffset = 0
+  private activeScrollPane: ScrollPane = 'chat'
 
   public constructor(options: WorkbenchRootViewOptions) {
     this.state = options.state
@@ -61,13 +70,28 @@ export class WorkbenchRootView implements Component, Focusable {
   }
 
   public handleInput(data: string): void {
+    if (matchesKey(data, Key.ctrl('1'))) {
+      this.activeScrollPane = 'chat'
+      return
+    }
+
+    if (matchesKey(data, Key.ctrl('2'))) {
+      this.activeScrollPane = 'thinking'
+      return
+    }
+
+    if (matchesKey(data, Key.ctrl('3'))) {
+      this.activeScrollPane = 'info'
+      return
+    }
+
     if (matchesKey(data, Key.ctrl('u'))) {
-      this.infoScrollOffset = Math.max(0, this.infoScrollOffset - 3)
+      this.scrollActivePane(-3)
       return
     }
 
     if (matchesKey(data, Key.ctrl('d'))) {
-      this.infoScrollOffset += 3
+      this.scrollActivePane(3)
       return
     }
 
@@ -78,12 +102,44 @@ export class WorkbenchRootView implements Component, Focusable {
     this.editor.invalidate()
   }
 
+  public handleViewCommand(command: string): WorkbenchViewCommandResult {
+    if (command === '/pane-chat') {
+      this.activeScrollPane = 'chat'
+      return { handled: true, message: 'Active scroll pane: chat' }
+    }
+
+    if (command === '/pane-thinking') {
+      this.activeScrollPane = 'thinking'
+      return { handled: true, message: 'Active scroll pane: thinking' }
+    }
+
+    if (command === '/pane-info') {
+      this.activeScrollPane = 'info'
+      return { handled: true, message: 'Active scroll pane: info' }
+    }
+
+    return { handled: false }
+  }
+
   public render(width: number): string[] {
     const view = presentWorkbenchState(this.state)
     const safeWidth = Math.max(width, 40)
     const infoWidth = Math.max(MIN_INFO_PANE_WIDTH, Math.floor(safeWidth * INFO_PANE_RATIO))
     const dividerWidth = 3
     const chatWidth = Math.max(20, safeWidth - infoWidth - dividerWidth)
+    const thinkingLines = this.renderThinkingLines(safeWidth)
+    const composerLabel = truncateToWidth(
+      `> composer: 自然语言默认聊天 | 输入 / 查看命令补全 | ctrl+1 chat | ctrl+2 thinking | ctrl+3 info | active: ${this.activeScrollPane}`,
+      safeWidth,
+      '...',
+      true,
+    )
+    const composerLines = this.editor.render(Math.max(20, safeWidth))
+    const bodyViewportHeight = this.resolveBodyViewportHeight({
+      totalWidth: safeWidth,
+      thinkingLines,
+      composerLines,
+    })
 
     const topBarLine = truncateToWidth(
       `model: ${view.topBar.modelId} | ctx: ${view.topBar.contextSummary} | version: ${view.topBar.appVersion} | mode: ${view.topBar.mode} | status: ${view.topBar.runtimeStatus}`,
@@ -94,20 +150,17 @@ export class WorkbenchRootView implements Component, Focusable {
 
     const chatLines = this.renderChatLines(chatWidth, view)
     const infoLines = this.renderInfoLines(infoWidth, view)
-    const visibleInfoLines = this.sliceInfoLines(infoLines, chatLines.length)
-    const rowCount = Math.max(chatLines.length, visibleInfoLines.length)
+    const visibleChatLines = this.slicePaneLines('chat', chatLines, bodyViewportHeight)
+    const visibleInfoLines = this.slicePaneLines('info', infoLines, bodyViewportHeight)
+    const rowCount = Math.max(bodyViewportHeight, visibleChatLines.length, visibleInfoLines.length)
     const bodyLines: string[] = []
 
     for (let index = 0; index < rowCount; index += 1) {
-      const left = truncateToWidth(chatLines[index] ?? '', chatWidth, '...', true)
+      const left = truncateToWidth(visibleChatLines[index] ?? '', chatWidth, '...', true)
       const right = truncateToWidth(visibleInfoLines[index] ?? '', infoWidth, '...', true)
 
       bodyLines.push(`${left} | ${right}`)
     }
-
-    const composerLabel = truncateToWidth('> composer: 自然语言默认聊天 | 输入 / 查看命令补全 | /xxx-xx 命中命令才执行任务', safeWidth, '...', true)
-    const composerLines = this.editor.render(Math.max(20, safeWidth))
-    const thinkingLines = this.renderThinkingLines(safeWidth)
 
     return [topBarLine, ''.padEnd(safeWidth, '-'), ...bodyLines, ''.padEnd(safeWidth, '-'), ...thinkingLines, composerLabel, ...composerLines]
   }
@@ -119,18 +172,22 @@ export class WorkbenchRootView implements Component, Focusable {
 
     if (this.state.execution.thinkingCollapsed) {
       return [
-        truncateToWidth(
+        this.decoratePaneTitle(
           `Thinking (collapsed) | ${this.state.execution.thinkingText.length} chars | /thinking-toggle to expand`,
+          'thinking',
           width,
-          '...',
-          true,
         ),
       ]
     }
 
-    return [
-      truncateToWidth('Thinking | /thinking-toggle to collapse', width, '...', true),
+    const allLines = [
+      this.decoratePaneTitle('Thinking | /thinking-toggle to collapse', 'thinking', width),
       ...wrapTextWithAnsi(this.state.execution.thinkingText, width),
+    ]
+    const visibleThinkingLines = this.slicePaneLines('thinking', allLines, 6)
+
+    return [
+      ...visibleThinkingLines,
       ''.padEnd(width, '.'),
     ]
   }
@@ -139,7 +196,7 @@ export class WorkbenchRootView implements Component, Focusable {
     width: number,
     view: ReturnType<typeof presentWorkbenchState>,
   ): string[] {
-    const lines = ['Chat']
+    const lines = [this.decoratePaneTitle('Chat', 'chat', width)]
 
     if (view.chatPane.messages.length === 0) {
       lines.push(...wrapTextWithAnsi('A: 请输入自然语言开始聊天；输入 / 可查看命令补全。', width))
@@ -162,7 +219,7 @@ export class WorkbenchRootView implements Component, Focusable {
     view: ReturnType<typeof presentWorkbenchState>,
   ): string[] {
     const lines = [
-      'Info',
+      this.decoratePaneTitle('Info', 'info', width),
       '',
       'Project',
       ...wrapTextWithAnsi(`workspace: ${view.rightPane.projectInfo.workspacePath}`, width),
@@ -220,15 +277,66 @@ export class WorkbenchRootView implements Component, Focusable {
     return lines
   }
 
-  private sliceInfoLines(lines: string[], visibleHeight: number): string[] {
+  private slicePaneLines(
+    pane: ScrollPane,
+    lines: string[],
+    visibleHeight: number,
+  ): string[] {
     if (visibleHeight <= 0) {
       return []
     }
 
     const maxOffset = Math.max(0, lines.length - visibleHeight)
-    this.infoScrollOffset = Math.min(this.infoScrollOffset, maxOffset)
+    if (pane === 'chat') {
+      this.chatScrollOffset = Math.min(this.chatScrollOffset, maxOffset)
+    }
 
-    return lines.slice(this.infoScrollOffset, this.infoScrollOffset + visibleHeight)
+    if (pane === 'thinking') {
+      this.thinkingScrollOffset = Math.min(this.thinkingScrollOffset, maxOffset)
+    }
+
+    if (pane === 'info') {
+      this.infoScrollOffset = Math.min(this.infoScrollOffset, maxOffset)
+    }
+
+    const offset = pane === 'chat'
+      ? this.chatScrollOffset
+      : pane === 'thinking'
+        ? this.thinkingScrollOffset
+        : this.infoScrollOffset
+
+    return lines.slice(offset, offset + visibleHeight)
+  }
+
+  private scrollActivePane(delta: number): void {
+    if (this.activeScrollPane === 'chat') {
+      this.chatScrollOffset = Math.max(0, this.chatScrollOffset + delta)
+      return
+    }
+
+    if (this.activeScrollPane === 'thinking') {
+      this.thinkingScrollOffset = Math.max(0, this.thinkingScrollOffset + delta)
+      return
+    }
+
+    this.infoScrollOffset = Math.max(0, this.infoScrollOffset + delta)
+  }
+
+  private decoratePaneTitle(label: string, pane: ScrollPane, width: number): string {
+    const suffix = this.activeScrollPane === pane ? ' *' : ''
+
+    return truncateToWidth(`${label}${suffix}`, width, '...', true)
+  }
+
+  private resolveBodyViewportHeight(input: {
+    totalWidth: number
+    thinkingLines: string[]
+    composerLines: string[]
+  }): number {
+    const assumedRows = 30
+    const reservedRows = 2 + input.thinkingLines.length + 1 + input.composerLines.length
+
+    return Math.max(8, assumedRows - reservedRows)
   }
 }
 
@@ -242,6 +350,9 @@ const WORKBENCH_COMMANDS: SlashCommand[] = [
   { name: 'review-latest', description: '查看最近一次审查结论' },
   { name: 'help-show', description: '查看命令帮助' },
   { name: 'thinking-toggle', description: '折叠或展开 Thinking 区' },
+  { name: 'pane-chat', description: '将滚动焦点切到聊天区' },
+  { name: 'pane-thinking', description: '将滚动焦点切到 Thinking 区' },
+  { name: 'pane-info', description: '将滚动焦点切到右侧信息区' },
 ]
 
 const EDITOR_THEME = {
