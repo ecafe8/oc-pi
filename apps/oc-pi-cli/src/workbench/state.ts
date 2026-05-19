@@ -195,6 +195,8 @@ export function setWorkbenchPlanDraft(
       currentAction: 'waiting for confirmation',
       latestAction: input.summary,
       requestedArtifactMode: input.requestedArtifactMode,
+      pendingAssistantMessage: undefined,
+      thinkingText: undefined,
     },
   }
 }
@@ -207,6 +209,123 @@ export function clearWorkbenchPendingExecution(state: WorkbenchState): Workbench
       pendingGoal: undefined,
       currentAction: 'waiting for input',
       requestedArtifactMode: 'preview',
+      pendingAssistantMessage: undefined,
+      thinkingText: undefined,
+    },
+  }
+}
+
+export function startWorkbenchAssistantReply(
+  state: WorkbenchState,
+): WorkbenchState {
+  return addTimelineItem(
+    {
+      ...setWorkbenchRuntimeStatus(state, 'thinking'),
+      execution: {
+        ...state.execution,
+        currentAction: 'waiting for ai reply',
+        latestAction: '',
+        pendingAssistantMessage: '',
+        thinkingText: '',
+      },
+    },
+    {
+      type: 'system-summary',
+      summary: '',
+      createdAt: new Date().toISOString(),
+      messageType: 'assistant-stream',
+      isStreaming: true,
+    },
+  )
+}
+
+export function finishWorkbenchAssistantReply(
+  state: WorkbenchState,
+  reply: string,
+): WorkbenchState {
+  const items = [...state.timeline.items]
+  const streamingIndex = items.findLastIndex(
+    (item) => item.messageType === 'assistant-stream' && item.isStreaming,
+  )
+
+  if (streamingIndex >= 0) {
+    const streamingItem = items[streamingIndex]
+
+    if (streamingItem) {
+      items[streamingIndex] = {
+        ...streamingItem,
+        summary: reply,
+        isStreaming: false,
+      }
+    }
+  } else {
+    items.push({
+      type: 'system-summary',
+      summary: reply,
+      createdAt: new Date().toISOString(),
+      messageType: 'assistant-stream',
+      isStreaming: false,
+    })
+  }
+
+  return {
+    ...setWorkbenchRuntimeStatus(state, 'idle'),
+    timeline: {
+      items,
+    },
+    execution: {
+      ...state.execution,
+      currentAction: 'waiting for input',
+      latestAction: reply,
+      pendingAssistantMessage: undefined,
+      thinkingText: undefined,
+    },
+  }
+}
+
+export function updateWorkbenchAssistantReplyDelta(
+  state: WorkbenchState,
+  delta: string,
+): WorkbenchState {
+  const items = [...state.timeline.items]
+  const streamingIndex = items.findLastIndex(
+    (item) => item.messageType === 'assistant-stream' && item.isStreaming,
+  )
+
+  if (streamingIndex >= 0) {
+    const streamingItem = items[streamingIndex]
+
+    if (streamingItem) {
+      items[streamingIndex] = {
+        ...streamingItem,
+        summary: `${streamingItem.summary}${delta}`,
+        isStreaming: true,
+      }
+    }
+  }
+
+  return {
+    ...state,
+    timeline: {
+      items,
+    },
+    execution: {
+      ...state.execution,
+      latestAction: `${state.execution.latestAction}${delta}`,
+      pendingAssistantMessage: `${state.execution.pendingAssistantMessage ?? ''}${delta}`,
+    },
+  }
+}
+
+export function updateWorkbenchAssistantThinkingDelta(
+  state: WorkbenchState,
+  delta: string,
+): WorkbenchState {
+  return {
+    ...state,
+    execution: {
+      ...state.execution,
+      thinkingText: `${state.execution.thinkingText ?? ''}${delta}`,
     },
   }
 }

@@ -107,8 +107,21 @@ export class WorkbenchRootView implements Component, Focusable {
 
     const composerLabel = truncateToWidth('> composer: 自然语言默认聊天 | 输入 / 查看命令补全 | /xxx-xx 命中命令才执行任务', safeWidth, '...', true)
     const composerLines = this.editor.render(Math.max(20, safeWidth))
+    const thinkingLines = this.renderThinkingLines(safeWidth)
 
-    return [topBarLine, ''.padEnd(safeWidth, '-'), ...bodyLines, ''.padEnd(safeWidth, '-'), composerLabel, ...composerLines]
+    return [topBarLine, ''.padEnd(safeWidth, '-'), ...bodyLines, ''.padEnd(safeWidth, '-'), ...thinkingLines, composerLabel, ...composerLines]
+  }
+
+  private renderThinkingLines(width: number): string[] {
+    if (!this.state.execution.thinkingText?.trim()) {
+      return []
+    }
+
+    return [
+      truncateToWidth('Thinking', width, '...', true),
+      ...wrapTextWithAnsi(this.state.execution.thinkingText, width),
+      ''.padEnd(width, '.'),
+    ]
   }
 
   private renderChatLines(
@@ -124,7 +137,7 @@ export class WorkbenchRootView implements Component, Focusable {
 
     for (const message of view.chatPane.messages) {
       const label = toMessagePrefix(message.type)
-      const streaming = message.isStreaming ? ' [streaming]' : ''
+      const streaming = message.isStreaming ? ' ...' : ''
       const content = `${label}: ${message.summary}${streaming}`
 
       lines.push(...wrapTextWithAnsi(content, width))

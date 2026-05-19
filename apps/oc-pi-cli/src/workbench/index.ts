@@ -11,6 +11,8 @@ import { createDefaultWorkbenchState } from '@/runtime/default-config.js'
 import { getCliRootPath } from '@/runtime/paths.js'
 import { FileRuntimeSessionStore } from '@/runtime/session-store.js'
 import {
+  appendAssistantReplyDelta,
+  appendAssistantThinkingDelta,
   applyChatReply,
   applyGoalPlanToWorkbench,
   handleCancelRun,
@@ -19,6 +21,7 @@ import {
   handleGoalNew,
   handleReviewLatest,
   handleStatusShow,
+  markAssistantReplyPending,
 } from '@/workbench/controller/index.js'
 import { WorkbenchRootView } from '@/workbench/views/index.js'
 
@@ -79,6 +82,11 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
             state,
             message: trimmed,
             cliRoot: getCliRootPath(),
+            onStateChange: (nextState) => {
+              state = nextState
+              rootView.setState(state)
+              tui.requestRender(true)
+            },
           })
           state = result.state
         }
@@ -139,19 +147,33 @@ async function handleChatInput(input: {
   state: import('@/workbench/types.js').WorkbenchState
   message: string
   cliRoot: string
+  onStateChange: (state: import('@/workbench/types.js').WorkbenchState) => void
 }): Promise<WorkbenchActionResult> {
-  const thinkingState = handleChatMessage({
+  const thinkingState = markAssistantReplyPending(handleChatMessage({
     state: input.state,
     message: input.message,
-  })
+  }))
+  input.onStateChange(thinkingState)
+
   const reply = await createChatReply({
     message: input.message,
     cliRoot: input.cliRoot,
     currentGoal: thinkingState.session.currentGoal,
+    onDelta: (delta, currentState) => {
+      const nextState = appendAssistantReplyDelta(currentState, delta)
+      input.onStateChange(nextState)
+      return nextState
+    },
+    onThinkingDelta: (delta, currentState) => {
+      const nextState = appendAssistantThinkingDelta(currentState, delta)
+      input.onStateChange(nextState)
+      return nextState
+    },
+    initialState: thinkingState,
   })
 
   return {
-    state: applyChatReply(thinkingState, reply),
+    state: applyChatReply(reply.state, reply.text),
   }
 }
 
@@ -332,7 +354,10 @@ async function createChatReply(input: {
   message: string
   cliRoot: string
   currentGoal?: string
-}): Promise<string> {
+  initialState: import('@/workbench/types.js').WorkbenchState
+  onDelta: (delta: string, state: import('@/workbench/types.js').WorkbenchState) => import('@/workbench/types.js').WorkbenchState
+  onThinkingDelta: (delta: string, state: import('@/workbench/types.js').WorkbenchState) => import('@/workbench/types.js').WorkbenchState
+}): Promise<{ text: string; state: import('@/workbench/types.js').WorkbenchState }> {
   try {
     const credentialStore = new FileOAuthCredentialStore()
     const loginBridge = new PiOAuthLoginBridge()
@@ -340,7 +365,10 @@ async function createChatReply(input: {
     const credentials = await credentialStore.read(DEFAULT_PROVIDER)
 
     if (!credentials) {
-      return createFallbackChatReply(input.message)
+      return {
+        text: createFallbackChatReply(input.message),
+        state: input.initialState,
+      }
     }
 
     const next = await loginBridge.getApiKey({
@@ -349,22 +377,43 @@ async function createChatReply(input: {
     })
 
     if (!next) {
-      return createFallbackChatReply(input.message)
+      return {
+        text: createFallbackChatReply(input.message),
+        state: input.initialState,
+      }
     }
 
     await credentialStore.write(DEFAULT_PROVIDER, next.newCredentials)
 
-    const response = await agentBridge.prompt({
+    let streamedText = ''
+    let currentState = input.initialState
+
+    for await (const event of agentBridge.promptStream({
       cwd: input.cliRoot,
       provider: DEFAULT_PROVIDER,
       modelId: DEFAULT_MODEL_ID,
       prompt: buildWorkbenchChatPrompt(input),
       apiKey: next.apiKey,
-    })
+    })) {
+      if (event.type === 'text-delta' && event.text) {
+        streamedText += event.text
+        currentState = input.onDelta(event.text, currentState)
+      }
 
-    return response.text.trim() || createFallbackChatReply(input.message)
+      if (event.type === 'thinking-delta' && event.text) {
+        currentState = input.onThinkingDelta(event.text, currentState)
+      }
+    }
+
+    return {
+      text: streamedText.trim() || createFallbackChatReply(input.message),
+      state: currentState,
+    }
   } catch {
-    return createFallbackChatReply(input.message)
+    return {
+      text: createFallbackChatReply(input.message),
+      state: input.initialState,
+    }
   }
 }
 

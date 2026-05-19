@@ -1,12 +1,16 @@
 import type { GoalToDocsRunRecord } from '@/planning/goal-to-docs/types.js'
 import {
   addTimelineItem,
+  finishWorkbenchAssistantReply,
   clearWorkbenchPendingExecution,
   setWorkbenchGoal,
   setWorkbenchPlanDraft,
   setWorkbenchReviewState,
+  startWorkbenchAssistantReply,
   setWorkbenchRuntimeStatus,
   syncWorkbenchSessionFromGoalToDocsRun,
+  updateWorkbenchAssistantReplyDelta,
+  updateWorkbenchAssistantThinkingDelta,
 } from '@/workbench/state.js'
 import type { WorkbenchState } from '@/workbench/types.js'
 import {
@@ -103,15 +107,27 @@ export function applyChatReply(
   state: WorkbenchState,
   reply: string,
 ): WorkbenchState {
-  return addTimelineItem(
-    setWorkbenchRuntimeStatus(state, 'idle'),
-    {
-      type: 'system-summary',
-      summary: reply,
-      createdAt: new Date().toISOString(),
-      messageType: 'assistant-stream',
-    },
-  )
+  return finishWorkbenchAssistantReply(state, reply)
+}
+
+export function markAssistantReplyPending(
+  state: WorkbenchState,
+): WorkbenchState {
+  return startWorkbenchAssistantReply(state)
+}
+
+export function appendAssistantReplyDelta(
+  state: WorkbenchState,
+  delta: string,
+): WorkbenchState {
+  return updateWorkbenchAssistantReplyDelta(state, delta)
+}
+
+export function appendAssistantThinkingDelta(
+  state: WorkbenchState,
+  delta: string,
+): WorkbenchState {
+  return updateWorkbenchAssistantThinkingDelta(state, delta)
 }
 
 export function applyGoalPlanToWorkbench(

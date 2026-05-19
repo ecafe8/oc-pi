@@ -1,7 +1,7 @@
 import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 
-import { completeSimple, getModels } from '@earendil-works/pi-ai'
+import { completeSimple, getModels, streamSimple } from '@earendil-works/pi-ai'
 import type {
   OAuthCredentialMap,
   OAuthCredentials,
@@ -14,6 +14,7 @@ import type {
   PiOAuthBridge,
   PiPromptRequest,
   PiPromptResponse,
+  PiPromptStreamEvent,
 } from '@/provider-adapters/types.js'
 import { getOAuthApiKey, loginGitHubCopilot } from '@earendil-works/pi-ai/oauth'
 
@@ -21,6 +22,19 @@ export class PlaceholderPiAgentBridge implements PiAgentBridge {
   public async prompt(request: PiPromptRequest): Promise<PiPromptResponse> {
     return {
       text: `[placeholder:${request.provider}/${request.modelId}] ${request.prompt}`,
+    }
+  }
+
+  public async *promptStream(request: PiPromptRequest): AsyncIterable<PiPromptStreamEvent> {
+    const response = await this.prompt(request)
+
+    yield {
+      type: 'text-delta',
+      text: response.text,
+    }
+
+    yield {
+      type: 'done',
     }
   }
 }
@@ -66,6 +80,63 @@ export class PiModelAgentBridge implements PiAgentBridge {
         .map((item) => item.text)
         .join('')
         .trim(),
+    }
+  }
+
+  public async *promptStream(request: PiPromptRequest): AsyncIterable<PiPromptStreamEvent> {
+    if (request.provider !== 'github-copilot') {
+      throw new Error(`Real prompt bridge is not implemented for provider: ${request.provider}`)
+    }
+
+    if (!request.apiKey) {
+      throw new Error(`API key is required for provider: ${request.provider}`)
+    }
+
+    const model = getModels('github-copilot').find(
+      (candidate) => candidate.id === request.modelId,
+    )
+
+    if (!model) {
+      throw new Error(`No GitHub Copilot model found for model ID: ${request.modelId}`)
+    }
+
+    const stream = streamSimple(
+      model,
+      {
+        messages: [
+          {
+            role: 'user',
+            content: request.prompt,
+            timestamp: Date.now(),
+          },
+        ],
+      },
+      {
+        apiKey: request.apiKey,
+        reasoning: 'minimal',
+      },
+    )
+
+    for await (const event of stream) {
+      if (event.type === 'text_delta') {
+        yield {
+          type: 'text-delta',
+          text: event.delta,
+        }
+      }
+
+      if (event.type === 'thinking_delta') {
+        yield {
+          type: 'thinking-delta',
+          text: event.delta,
+        }
+      }
+
+      if (event.type === 'done') {
+        yield {
+          type: 'done',
+        }
+      }
     }
   }
 }

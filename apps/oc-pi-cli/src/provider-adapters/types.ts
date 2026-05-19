@@ -30,12 +30,18 @@ export interface PiPromptRequest {
   apiKey?: string
 }
 
+export interface PiPromptStreamEvent {
+  type: 'text-delta' | 'thinking-delta' | 'done'
+  text?: string
+}
+
 export interface PiPromptResponse {
   text: string
 }
 
 export interface PiAgentBridge {
   prompt(request: PiPromptRequest): Promise<PiPromptResponse>
+  promptStream(request: PiPromptRequest): AsyncIterable<PiPromptStreamEvent>
 }
 
 export type OAuthCredentials = PiOAuthCredentials

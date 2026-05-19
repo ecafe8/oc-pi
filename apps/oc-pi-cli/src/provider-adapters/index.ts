@@ -23,6 +23,7 @@ export type {
   PiOAuthBridge,
   PiPromptRequest,
   PiPromptResponse,
+  PiPromptStreamEvent,
   ProviderAuthMode,
   ProviderModelMapping,
   ResolveProviderModelInput,

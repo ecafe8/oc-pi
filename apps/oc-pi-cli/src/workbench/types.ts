@@ -70,6 +70,8 @@ export interface WorkbenchExecutionState {
   executionBoundary: 'preview' | 'sandbox' | 'workspace-docs';
   pendingGoal?: string;
   requestedArtifactMode: 'preview' | 'write';
+  pendingAssistantMessage?: string;
+  thinkingText?: string;
 }
 
 export interface WorkbenchStatusBarState {
