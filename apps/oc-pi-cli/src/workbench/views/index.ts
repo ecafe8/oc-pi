@@ -86,7 +86,7 @@ export class WorkbenchRootView implements Component, Focusable {
       bodyLines.push(`${left} | ${right}`)
     }
 
-    const composerLabel = truncateToWidth('> composer: natural goal text | /confirm-execute | /cancel-run | /status-show | /review-latest | ctrl+u/d scroll', safeWidth, '...', true)
+    const composerLabel = truncateToWidth('> composer: 自然语言默认聊天 | /xxx-xx 命中命令才执行任务 | ctrl+u/d scroll', safeWidth, '...', true)
     const composerInput = this.input.render(Math.max(8, safeWidth))[0] ?? ''.padEnd(safeWidth, ' ')
 
     return [topBarLine, ''.padEnd(safeWidth, '-'), ...bodyLines, ''.padEnd(safeWidth, '-'), composerLabel, truncateToWidth(composerInput, safeWidth, '...', true)]
