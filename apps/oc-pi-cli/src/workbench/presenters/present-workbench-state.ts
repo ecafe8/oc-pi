@@ -97,7 +97,7 @@ export function presentWorkbenchState(
     rightPane: {
       projectInfo: {
         workspacePath: state.session.workspacePath,
-        goalSummary: latestGoalItem?.summary,
+        goalSummary: state.session.currentGoal ?? latestGoalItem?.summary,
         currentStageId: state.session.currentStageId,
         currentStageStatus: state.session.currentStageStatus,
         activeRoleId: state.session.activeRoleId,

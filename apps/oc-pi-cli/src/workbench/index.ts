@@ -1,18 +1,48 @@
 import { ProcessTerminal, TUI, matchesKey } from '@earendil-works/pi-tui'
 
+import {
+  FileOAuthCredentialStore,
+  PiModelAgentBridge,
+  PiOAuthLoginBridge,
+} from '@/provider-adapters/index.js'
+import { type ArtifactMode, runGoalToDocsMvp } from '@/planning/goal-to-docs/run-mvp.js'
+import type { GoalToDocsRunRecord } from '@/planning/goal-to-docs/types.js'
 import { createDefaultWorkbenchState } from '@/runtime/default-config.js'
+import { getCliRootPath } from '@/runtime/paths.js'
 import { FileRuntimeSessionStore } from '@/runtime/session-store.js'
-import { handleGoalNew } from '@/workbench/controller/index.js'
+import {
+  applyGoalPlanToWorkbench,
+  handleCancelRun,
+  handleConfirmExecute,
+  handleGoalNew,
+  handleReviewLatest,
+  handleStatusShow,
+} from '@/workbench/controller/index.js'
 import { WorkbenchRootView } from '@/workbench/views/index.js'
 
 export interface StartWorkbenchOptions {
   workspacePath: string
 }
 
+interface GoalPlanDraft {
+  summary: string
+  steps: string[]
+  shouldWrite: boolean
+}
+
+interface WorkbenchActionResult {
+  state: import('@/workbench/types.js').WorkbenchState
+  latestRun?: GoalToDocsRunRecord
+}
+
+const DEFAULT_PROVIDER = 'github-copilot'
+const DEFAULT_MODEL_ID = 'gpt-5-mini'
+
 export async function startWorkbench(options: StartWorkbenchOptions): Promise<void> {
   const sessionStore = new FileRuntimeSessionStore(options.workspacePath)
-  const session = await sessionStore.read()
+  let session = await sessionStore.read()
   let state = session?.workbenchState ?? createDefaultWorkbenchState(options.workspacePath)
+  let isBusy = false
 
   const terminal = new ProcessTerminal()
   const tui = new TUI(terminal)
@@ -21,23 +51,45 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
     onSubmit: async (value) => {
       const trimmed = value.trim()
 
-      if (trimmed.length === 0) {
+      if (trimmed.length === 0 || isBusy) {
         return
       }
 
-      const next = handleGoalNew({
-        state,
-        goal: trimmed,
-      })
+      isBusy = true
 
-      state = next.state
-      rootView.setState(state)
-      tui.requestRender(true)
+      try {
+        if (trimmed.startsWith('/')) {
+          const result = await handleWorkbenchCommand({
+            state,
+            input: trimmed,
+            cliRoot: getCliRootPath(),
+            latestRun: session?.latestRun,
+          })
+          state = result.state
+          session = {
+            workbenchState: state,
+            latestRun: result.latestRun ?? session?.latestRun,
+          }
+        } else {
+          const result = await handleGoalPlanning({
+            state,
+            goal: trimmed,
+            cliRoot: getCliRootPath(),
+          })
+          state = result.state
+        }
 
-      await sessionStore.write({
-        workbenchState: state,
-        latestRun: session?.latestRun,
-      })
+        rootView.setState(state)
+        tui.requestRender(true)
+
+        await sessionStore.write({
+          workbenchState: state,
+          latestRun: session?.latestRun,
+        })
+        session = await sessionStore.read()
+      } finally {
+        isBusy = false
+      }
     },
   })
 
@@ -52,4 +104,282 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
     return undefined
   })
   tui.start()
+}
+
+async function handleGoalPlanning(input: {
+  state: import('@/workbench/types.js').WorkbenchState
+  goal: string
+  cliRoot: string
+}): Promise<WorkbenchActionResult> {
+  const next = handleGoalNew({
+    state: input.state,
+    goal: input.goal,
+  })
+  const plan = await createGoalPlan({
+    goal: input.goal,
+    cliRoot: input.cliRoot,
+  })
+
+  return {
+    state: applyGoalPlanToWorkbench({
+      state: next.state,
+      goal: input.goal,
+      summary: plan.summary,
+      steps: plan.steps,
+      shouldWrite: plan.shouldWrite,
+    }),
+  }
+}
+
+async function handleWorkbenchCommand(input: {
+  state: import('@/workbench/types.js').WorkbenchState
+  input: string
+  cliRoot: string
+  latestRun?: import('@/planning/goal-to-docs/types.js').GoalToDocsRunRecord
+}): Promise<WorkbenchActionResult> {
+  switch (input.input) {
+    case '/confirm-execute': {
+      const confirmed = handleConfirmExecute(input.state)
+
+      if (!confirmed.canExecute || !confirmed.goal) {
+        return {
+          state: confirmed.state,
+          latestRun: input.latestRun,
+        }
+      }
+
+      const artifactMode: ArtifactMode = confirmed.shouldWrite ? 'write' : 'preview'
+      const result = await runGoalToDocsMvp({
+        goal: confirmed.goal,
+        cliRoot: input.cliRoot,
+        artifactMode,
+        initialWorkbenchState: confirmed.state,
+        skipInitialGoalTimeline: true,
+      })
+
+      return {
+        state: result.workbenchState,
+        latestRun: result.run,
+      }
+    }
+
+    case '/cancel-run':
+      return {
+        state: handleCancelRun(input.state),
+        latestRun: input.latestRun,
+      }
+
+    case '/status-show': {
+      const result = handleStatusShow(input.state)
+
+      return {
+        state: {
+          ...input.state,
+          timeline: {
+            items: [
+              ...input.state.timeline.items,
+              {
+                type: 'system-summary',
+                summary: `status: ${result.command.state.topBar.runtimeStatus}, boundary: ${result.command.state.rightPane.projectInfo.executionBoundary}`,
+                createdAt: new Date().toISOString(),
+                messageType: 'system-status',
+              },
+            ],
+          },
+        },
+        latestRun: input.latestRun,
+      }
+    }
+
+    case '/review-latest': {
+      const result = handleReviewLatest(input.state)
+
+      return {
+        state: {
+          ...input.state,
+          timeline: {
+            items: [
+              ...input.state.timeline.items,
+              {
+                type: 'review-result',
+                summary: result.command.latestSummary ?? 'No review available yet.',
+                createdAt: new Date().toISOString(),
+                messageType: 'result',
+              },
+            ],
+          },
+        },
+        latestRun: input.latestRun,
+      }
+    }
+
+    case '/help-show':
+      return {
+        state: appendSystemMessage(input.state, 'Commands: /goal-new /confirm-execute /cancel-run /status-show /review-latest /help-show'),
+        latestRun: input.latestRun,
+      }
+
+    case '/goal-new':
+      return {
+        state: appendSystemMessage(input.state, 'Goal input mode enabled. 请直接输入新的目标文本。'),
+        latestRun: input.latestRun,
+      }
+
+    case '/goal-run': {
+      if (!input.state.session.currentGoal) {
+        return {
+          state: appendSystemMessage(input.state, 'No current goal. 请先输入目标文本。'),
+          latestRun: input.latestRun,
+        }
+      }
+
+      return handleGoalPlanning({
+        state: input.state,
+        goal: input.state.session.currentGoal,
+        cliRoot: input.cliRoot,
+      })
+    }
+
+    case '/goal-retry': {
+      if (!input.state.session.currentGoal) {
+        return {
+          state: appendSystemMessage(input.state, 'No current goal to retry.'),
+          latestRun: input.latestRun,
+        }
+      }
+
+      const retriedState = appendSystemMessage(input.state, 'Retrying AI plan generation for current goal.')
+
+      return handleGoalPlanning({
+        state: retriedState,
+        goal: input.state.session.currentGoal,
+        cliRoot: input.cliRoot,
+      })
+    }
+
+    default:
+      return {
+        state: appendSystemMessage(input.state, `Unknown command: ${input.input}`),
+        latestRun: input.latestRun,
+      }
+  }
+}
+
+async function createGoalPlan(input: {
+  goal: string
+  cliRoot: string
+}): Promise<GoalPlanDraft> {
+  try {
+    const credentialStore = new FileOAuthCredentialStore()
+    const loginBridge = new PiOAuthLoginBridge()
+    const agentBridge = new PiModelAgentBridge()
+    const credentials = await credentialStore.read(DEFAULT_PROVIDER)
+
+    if (!credentials) {
+      return createFallbackPlan(input.goal)
+    }
+
+    const next = await loginBridge.getApiKey({
+      provider: DEFAULT_PROVIDER,
+      credentials: { [DEFAULT_PROVIDER]: credentials },
+    })
+
+    if (!next) {
+      return createFallbackPlan(input.goal)
+    }
+
+    await credentialStore.write(DEFAULT_PROVIDER, next.newCredentials)
+
+    const response = await agentBridge.prompt({
+      cwd: input.cliRoot,
+      provider: DEFAULT_PROVIDER,
+      modelId: DEFAULT_MODEL_ID,
+      prompt: buildGoalPlanPrompt(input.goal),
+      apiKey: next.apiKey,
+    })
+
+    return parseGoalPlanResponse(response.text, input.goal)
+  } catch {
+    return createFallbackPlan(input.goal)
+  }
+}
+
+function buildGoalPlanPrompt(goal: string): string {
+  return [
+    '你是 apps/oc-pi-cli 的工作台规划助手。',
+    '请先判断这个目标是否需要实际写文件。',
+    '只返回 JSON，不要输出 Markdown 或解释。',
+    'JSON schema:',
+    '{"summary":"string","shouldWrite":true,"steps":["step 1","step 2","step 3"]}',
+    '规则:',
+    '- summary 必须是一段简短中文执行方案',
+    '- shouldWrite 表示执行阶段是否需要落地写入文件；若仅适合预览分析则为 false',
+    '- steps 给出 3 到 5 条中文短步骤',
+    `goal: ${goal}`,
+  ].join('\n')
+}
+
+function parseGoalPlanResponse(text: string, goal: string): GoalPlanDraft {
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*\}/)
+
+    if (!jsonMatch) {
+      return createFallbackPlan(goal)
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]) as {
+      summary?: string
+      shouldWrite?: boolean
+      steps?: string[]
+    }
+
+    if (!parsed.summary || !Array.isArray(parsed.steps) || parsed.steps.length === 0) {
+      return createFallbackPlan(goal)
+    }
+
+    return {
+      summary: parsed.summary,
+      shouldWrite: parsed.shouldWrite ?? true,
+      steps: parsed.steps.slice(0, 5),
+    }
+  } catch {
+    return createFallbackPlan(goal)
+  }
+}
+
+function createFallbackPlan(goal: string): GoalPlanDraft {
+  const shouldWrite = /生成|写入|更新|落地|文档|docs|文件/.test(goal)
+
+  return {
+    summary: shouldWrite
+      ? `我建议先确认目标边界，然后执行四阶段 goal-to-docs，并根据运行阶段决定写入 sandbox 还是 workspace docs。`
+      : '我建议先做预览分析，确认范围与阶段输出后再决定是否写入。',
+    shouldWrite,
+    steps: [
+      '确认目标范围与输出边界',
+      '生成四阶段执行方案',
+      '等待用户确认是否执行',
+      shouldWrite ? '执行并输出结果文件摘要' : '预览结果并等待下一步确认',
+    ],
+  }
+}
+
+function appendSystemMessage(
+  state: import('@/workbench/types.js').WorkbenchState,
+  summary: string,
+): import('@/workbench/types.js').WorkbenchState {
+  return {
+    ...state,
+    timeline: {
+      items: [
+        ...state.timeline.items,
+        {
+          type: 'system-summary',
+          summary,
+          createdAt: new Date().toISOString(),
+          messageType: 'system-status',
+        },
+      ],
+    },
+  }
 }

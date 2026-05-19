@@ -24,6 +24,7 @@ export interface WorkbenchSessionState {
   currentStageStatus: StageStatus;
   activeRoleId: RoleId;
   activeOutputTarget: SlotId;
+  currentGoal?: string;
 }
 
 export interface WorkbenchInspectorState {
@@ -67,6 +68,8 @@ export interface WorkbenchExecutionState {
   latestAction: string;
   touchedFiles: string[];
   executionBoundary: 'preview' | 'sandbox' | 'workspace-docs';
+  pendingGoal?: string;
+  requestedArtifactMode: 'preview' | 'write';
 }
 
 export interface WorkbenchStatusBarState {

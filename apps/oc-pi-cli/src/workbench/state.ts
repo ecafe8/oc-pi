@@ -82,6 +82,7 @@ export function createWorkbenchExecutionState(): WorkbenchExecutionState {
     latestAction: 'workbench created',
     touchedFiles: [],
     executionBoundary: 'preview',
+    requestedArtifactMode: 'preview',
   }
 }
 
@@ -162,6 +163,54 @@ export function setWorkbenchReviewState(
   };
 }
 
+export function setWorkbenchGoal(state: WorkbenchState, goal: string): WorkbenchState {
+  return {
+    ...state,
+    session: {
+      ...state.session,
+      currentGoal: goal,
+    },
+    execution: {
+      ...state.execution,
+      pendingGoal: goal,
+    },
+  }
+}
+
+export function setWorkbenchPlanDraft(
+  state: WorkbenchState,
+  input: {
+    summary: string
+    steps: WorkbenchPlanStep[]
+    requestedArtifactMode: WorkbenchState['execution']['requestedArtifactMode']
+  },
+): WorkbenchState {
+  return {
+    ...state,
+    plan: {
+      steps: input.steps,
+    },
+    execution: {
+      ...state.execution,
+      currentAction: 'waiting for confirmation',
+      latestAction: input.summary,
+      requestedArtifactMode: input.requestedArtifactMode,
+    },
+  }
+}
+
+export function clearWorkbenchPendingExecution(state: WorkbenchState): WorkbenchState {
+  return {
+    ...state,
+    execution: {
+      ...state.execution,
+      pendingGoal: undefined,
+      currentAction: 'waiting for input',
+      requestedArtifactMode: 'preview',
+    },
+  }
+}
+
 export function syncWorkbenchSessionFromGoalToDocsRun(state: WorkbenchState, run: GoalToDocsRunRecord): WorkbenchState {
   const currentStage = run.stages.find((stage) => stage.stageId === run.currentStageId);
 
@@ -231,6 +280,7 @@ export function setWorkbenchExecutionBoundary(
     execution: {
       ...state.execution,
       executionBoundary,
+      requestedArtifactMode: artifactMode === 'preview' ? 'preview' : 'write',
     },
   }
 }

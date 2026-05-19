@@ -50,6 +50,8 @@ export interface RunGoalToDocsMvpInput {
   cliRoot: string
   artifactMode?: ArtifactMode
   confirmRealWrite?: (request: RealWriteConfirmationRequest) => Promise<boolean>
+  initialWorkbenchState?: WorkbenchState
+  skipInitialGoalTimeline?: boolean
 }
 
 export interface RunGoalToDocsMvpResult {
@@ -119,12 +121,16 @@ export async function runGoalToDocsMvp(
   const apiKeyCache = new Map<string, string>()
   const artifactMode = resolveEffectiveArtifactMode(input.artifactMode ?? 'preview')
   const shouldWriteArtifacts = artifactMode !== 'preview'
-  const initialState = createDefaultWorkbenchState(input.cliRoot)
+  const initialState = input.initialWorkbenchState ?? createDefaultWorkbenchState(input.cliRoot)
   const preparedState = setWorkbenchExecutionBoundary(initialState, artifactMode)
-  const goalResult = handleGoalNew({
-    state: preparedState,
-    goal: input.goal,
-  })
+  const goalResult = input.skipInitialGoalTimeline
+    ? {
+        state: setWorkbenchRuntimeStatus(preparedState, 'running'),
+      }
+    : handleGoalNew({
+        state: preparedState,
+        goal: input.goal,
+      })
   const firstStage = DEFAULT_GOAL_TO_DOCS_STAGES[0]
   const secondStage = DEFAULT_GOAL_TO_DOCS_STAGES[1]
 

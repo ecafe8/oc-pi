@@ -1,5 +1,13 @@
 import type { GoalToDocsRunRecord } from '@/planning/goal-to-docs/types.js'
-import { addTimelineItem, setWorkbenchReviewState, setWorkbenchRuntimeStatus, syncWorkbenchSessionFromGoalToDocsRun } from '@/workbench/state.js'
+import {
+  addTimelineItem,
+  clearWorkbenchPendingExecution,
+  setWorkbenchGoal,
+  setWorkbenchPlanDraft,
+  setWorkbenchReviewState,
+  setWorkbenchRuntimeStatus,
+  syncWorkbenchSessionFromGoalToDocsRun,
+} from '@/workbench/state.js'
 import type { WorkbenchState } from '@/workbench/types.js'
 import {
   runGoalNewCommand,
@@ -31,16 +39,35 @@ export interface SyncGoalRunControllerResult {
   command: ReturnType<typeof runGoalRunSummaryCommand>
 }
 
+export interface ApplyGoalPlanControllerInput {
+  state: WorkbenchState
+  goal: string
+  summary: string
+  steps: string[]
+  shouldWrite: boolean
+}
+
+export interface ConfirmExecuteControllerResult {
+  state: WorkbenchState
+  goal?: string
+  shouldWrite: boolean
+  canExecute: boolean
+}
+
 export function handleGoalNew(
   input: GoalNewControllerInput,
 ): GoalNewControllerResult {
   const command = runGoalNewCommand({ goal: input.goal })
   const state = addTimelineItem(
-    setWorkbenchRuntimeStatus(input.state, 'running'),
+    setWorkbenchGoal(
+      setWorkbenchRuntimeStatus(input.state, 'thinking'),
+      input.goal,
+    ),
     {
       type: 'user-input',
       summary: input.goal,
       createdAt: new Date().toISOString(),
+      messageType: 'user',
     },
   )
 
@@ -48,6 +75,83 @@ export function handleGoalNew(
     state,
     command,
   }
+}
+
+export function applyGoalPlanToWorkbench(
+  input: ApplyGoalPlanControllerInput,
+): WorkbenchState {
+  const nextState = setWorkbenchPlanDraft(input.state, {
+    summary: input.summary,
+    steps: input.steps.map((label) => ({
+      label,
+      status: 'pending',
+    })),
+    requestedArtifactMode: input.shouldWrite ? 'write' : 'preview',
+  })
+
+  return addTimelineItem(
+    addTimelineItem(
+      setWorkbenchRuntimeStatus(nextState, 'waiting-user'),
+      {
+        type: 'system-summary',
+        summary: input.summary,
+        createdAt: new Date().toISOString(),
+        messageType: 'assistant-plan',
+      },
+    ),
+    {
+      type: 'system-summary',
+      summary: input.shouldWrite
+        ? 'waiting-user: AI 建议执行写入，等待你确认。'
+        : 'waiting-user: AI 建议先执行预览，等待你确认。',
+      createdAt: new Date().toISOString(),
+      messageType: 'system-status',
+    },
+  )
+}
+
+export function handleConfirmExecute(state: WorkbenchState): ConfirmExecuteControllerResult {
+  if (!state.execution.pendingGoal) {
+    return {
+      state: addTimelineItem(state, {
+        type: 'system-summary',
+        summary: 'No pending goal to execute. 请先输入目标并等待 AI 方案。',
+        createdAt: new Date().toISOString(),
+        messageType: 'system-status',
+      }),
+      shouldWrite: false,
+      canExecute: false,
+    }
+  }
+
+  return {
+    state: addTimelineItem(
+      setWorkbenchRuntimeStatus(state, 'running'),
+      {
+        type: 'system-summary',
+        summary: state.execution.requestedArtifactMode === 'write'
+          ? 'Execution started. AI 已确认需要写入，开始执行。'
+          : 'Execution started. AI 已确认先执行预览。',
+        createdAt: new Date().toISOString(),
+        messageType: 'system-status',
+      },
+    ),
+    goal: state.execution.pendingGoal,
+    shouldWrite: state.execution.requestedArtifactMode === 'write',
+    canExecute: true,
+  }
+}
+
+export function handleCancelRun(state: WorkbenchState): WorkbenchState {
+  return addTimelineItem(
+    setWorkbenchRuntimeStatus(clearWorkbenchPendingExecution(state), 'idle'),
+    {
+      type: 'system-summary',
+      summary: 'Cancelled pending execution plan.',
+      createdAt: new Date().toISOString(),
+      messageType: 'system-status',
+    },
+  )
 }
 
 export function handleStatusShow(
