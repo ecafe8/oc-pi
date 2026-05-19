@@ -270,7 +270,7 @@ async function handleWorkbenchCommand(input: {
 
     case '/help-show':
       return {
-        state: appendSystemMessage(input.state, 'Commands: /goal-new /goal-run /goal-retry /confirm-execute /cancel-run /status-show /review-latest /help-show /thinking-toggle'),
+        state: appendSystemMessage(input.state, 'Commands: /goal-new /goal-run /goal-retry /confirm-execute /cancel-run /status-show /review-latest /help-show /thinking-toggle /pane-chat /pane-thinking /pane-info'),
         latestRun: input.latestRun,
       }
 
