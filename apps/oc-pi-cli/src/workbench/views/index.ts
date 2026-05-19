@@ -1,4 +1,15 @@
-import { Input, Key, type Component, type Focusable, matchesKey, truncateToWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui'
+import {
+  CombinedAutocompleteProvider,
+  Editor,
+  Key,
+  type Component,
+  type Focusable,
+  type SlashCommand,
+  type TUI,
+  matchesKey,
+  truncateToWidth,
+  wrapTextWithAnsi,
+} from '@earendil-works/pi-tui'
 
 import { presentWorkbenchState } from '@/workbench/presenters/present-workbench-state.js'
 import type { WorkbenchState } from '@/workbench/types.js'
@@ -7,27 +18,35 @@ const MIN_INFO_PANE_WIDTH = 28
 const INFO_PANE_RATIO = 0.34
 
 export interface WorkbenchRootViewOptions {
+  tui: TUI
+  workspacePath: string
   state: WorkbenchState
   onSubmit: (value: string) => void
 }
 
 export class WorkbenchRootView implements Component, Focusable {
-  private readonly input: Input
+  private readonly editor: Editor
   private state: WorkbenchState
   private infoScrollOffset = 0
 
   public constructor(options: WorkbenchRootViewOptions) {
     this.state = options.state
-    this.input = new Input()
-    this.input.onSubmit = (value) => {
+    this.editor = new Editor(options.tui, EDITOR_THEME, {
+      paddingX: 0,
+      autocompleteMaxVisible: 6,
+    })
+    this.editor.setAutocompleteProvider(
+      new CombinedAutocompleteProvider(WORKBENCH_COMMANDS, options.workspacePath),
+    )
+    this.editor.onSubmit = (value) => {
       options.onSubmit(value)
-      this.input.setValue('')
+      this.editor.setText('')
     }
   }
 
   public set focused(value: boolean) {
     this._focused = value
-    this.input.focused = value
+    this.editor.focused = value
   }
 
   public get focused(): boolean {
@@ -52,11 +71,11 @@ export class WorkbenchRootView implements Component, Focusable {
       return
     }
 
-    this.input.handleInput(data)
+    this.editor.handleInput(data)
   }
 
   public invalidate(): void {
-    this.input.invalidate()
+    this.editor.invalidate()
   }
 
   public render(width: number): string[] {
@@ -86,10 +105,10 @@ export class WorkbenchRootView implements Component, Focusable {
       bodyLines.push(`${left} | ${right}`)
     }
 
-    const composerLabel = truncateToWidth('> composer: 自然语言默认聊天 | /xxx-xx 命中命令才执行任务 | ctrl+u/d scroll', safeWidth, '...', true)
-    const composerInput = this.input.render(Math.max(8, safeWidth))[0] ?? ''.padEnd(safeWidth, ' ')
+    const composerLabel = truncateToWidth('> composer: 自然语言默认聊天 | 输入 / 查看命令补全 | /xxx-xx 命中命令才执行任务', safeWidth, '...', true)
+    const composerLines = this.editor.render(Math.max(20, safeWidth))
 
-    return [topBarLine, ''.padEnd(safeWidth, '-'), ...bodyLines, ''.padEnd(safeWidth, '-'), composerLabel, truncateToWidth(composerInput, safeWidth, '...', true)]
+    return [topBarLine, ''.padEnd(safeWidth, '-'), ...bodyLines, ''.padEnd(safeWidth, '-'), composerLabel, ...composerLines]
   }
 
   private renderChatLines(
@@ -99,7 +118,7 @@ export class WorkbenchRootView implements Component, Focusable {
     const lines = ['Chat']
 
     if (view.chatPane.messages.length === 0) {
-      lines.push(...wrapTextWithAnsi('A: 请输入目标，或使用 /goal-new 进入目标输入模式。', width))
+      lines.push(...wrapTextWithAnsi('A: 请输入自然语言开始聊天；输入 / 可查看命令补全。', width))
       return lines
     }
 
@@ -187,6 +206,28 @@ export class WorkbenchRootView implements Component, Focusable {
 
     return lines.slice(this.infoScrollOffset, this.infoScrollOffset + visibleHeight)
   }
+}
+
+const WORKBENCH_COMMANDS: SlashCommand[] = [
+  { name: 'goal-new', description: '设置新的 goal 目标' },
+  { name: 'goal-run', description: '基于当前 goal 生成执行方案' },
+  { name: 'goal-retry', description: '重新生成当前 goal 的方案' },
+  { name: 'confirm-execute', description: '确认当前方案并开始执行' },
+  { name: 'cancel-run', description: '取消待执行方案' },
+  { name: 'status-show', description: '查看当前状态摘要' },
+  { name: 'review-latest', description: '查看最近一次审查结论' },
+  { name: 'help-show', description: '查看命令帮助' },
+]
+
+const EDITOR_THEME = {
+  borderColor: (text: string): string => text,
+  selectList: {
+    selectedPrefix: (text: string): string => text,
+    selectedText: (text: string): string => text,
+    description: (text: string): string => text,
+    scrollInfo: (text: string): string => text,
+    noMatch: (text: string): string => text,
+  },
 }
 
 function toMessagePrefix(type: string): string {

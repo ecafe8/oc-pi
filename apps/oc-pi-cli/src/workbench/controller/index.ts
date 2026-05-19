@@ -54,6 +54,11 @@ export interface ConfirmExecuteControllerResult {
   canExecute: boolean
 }
 
+export interface ChatMessageControllerInput {
+  state: WorkbenchState
+  message: string
+}
+
 export function handleGoalNew(
   input: GoalNewControllerInput,
 ): GoalNewControllerResult {
@@ -75,6 +80,38 @@ export function handleGoalNew(
     state,
     command,
   }
+}
+
+export function handleChatMessage(
+  input: ChatMessageControllerInput,
+): WorkbenchState {
+  return addTimelineItem(
+    setWorkbenchGoal(
+      setWorkbenchRuntimeStatus(input.state, 'thinking'),
+      input.message,
+    ),
+    {
+      type: 'user-input',
+      summary: input.message,
+      createdAt: new Date().toISOString(),
+      messageType: 'user',
+    },
+  )
+}
+
+export function applyChatReply(
+  state: WorkbenchState,
+  reply: string,
+): WorkbenchState {
+  return addTimelineItem(
+    setWorkbenchRuntimeStatus(state, 'idle'),
+    {
+      type: 'system-summary',
+      summary: reply,
+      createdAt: new Date().toISOString(),
+      messageType: 'assistant-stream',
+    },
+  )
 }
 
 export function applyGoalPlanToWorkbench(

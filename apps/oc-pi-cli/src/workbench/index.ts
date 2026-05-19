@@ -11,8 +11,10 @@ import { createDefaultWorkbenchState } from '@/runtime/default-config.js'
 import { getCliRootPath } from '@/runtime/paths.js'
 import { FileRuntimeSessionStore } from '@/runtime/session-store.js'
 import {
+  applyChatReply,
   applyGoalPlanToWorkbench,
   handleCancelRun,
+  handleChatMessage,
   handleConfirmExecute,
   handleGoalNew,
   handleReviewLatest,
@@ -47,6 +49,8 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
   const terminal = new ProcessTerminal()
   const tui = new TUI(terminal)
   const rootView = new WorkbenchRootView({
+    tui,
+    workspacePath: options.workspacePath,
     state,
     onSubmit: async (value) => {
       const trimmed = value.trim()
@@ -71,9 +75,9 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
             latestRun: result.latestRun ?? session?.latestRun,
           }
         } else {
-          const result = await handleGoalPlanning({
+          const result = await handleChatInput({
             state,
-            goal: trimmed,
+            message: trimmed,
             cliRoot: getCliRootPath(),
           })
           state = result.state
@@ -128,6 +132,26 @@ async function handleGoalPlanning(input: {
       steps: plan.steps,
       shouldWrite: plan.shouldWrite,
     }),
+  }
+}
+
+async function handleChatInput(input: {
+  state: import('@/workbench/types.js').WorkbenchState
+  message: string
+  cliRoot: string
+}): Promise<WorkbenchActionResult> {
+  const thinkingState = handleChatMessage({
+    state: input.state,
+    message: input.message,
+  })
+  const reply = await createChatReply({
+    message: input.message,
+    cliRoot: input.cliRoot,
+    currentGoal: thinkingState.session.currentGoal,
+  })
+
+  return {
+    state: applyChatReply(thinkingState, reply),
   }
 }
 
@@ -221,7 +245,7 @@ async function handleWorkbenchCommand(input: {
 
     case '/goal-new':
       return {
-        state: appendSystemMessage(input.state, 'Goal input mode enabled. 请直接输入新的目标文本。'),
+        state: appendSystemMessage(input.state, '已准备新的 goal。接下来请用自然语言描述目标，再用 /goal-run 生成执行方案。'),
         latestRun: input.latestRun,
       }
 
@@ -304,6 +328,60 @@ async function createGoalPlan(input: {
   }
 }
 
+async function createChatReply(input: {
+  message: string
+  cliRoot: string
+  currentGoal?: string
+}): Promise<string> {
+  try {
+    const credentialStore = new FileOAuthCredentialStore()
+    const loginBridge = new PiOAuthLoginBridge()
+    const agentBridge = new PiModelAgentBridge()
+    const credentials = await credentialStore.read(DEFAULT_PROVIDER)
+
+    if (!credentials) {
+      return createFallbackChatReply(input.message)
+    }
+
+    const next = await loginBridge.getApiKey({
+      provider: DEFAULT_PROVIDER,
+      credentials: { [DEFAULT_PROVIDER]: credentials },
+    })
+
+    if (!next) {
+      return createFallbackChatReply(input.message)
+    }
+
+    await credentialStore.write(DEFAULT_PROVIDER, next.newCredentials)
+
+    const response = await agentBridge.prompt({
+      cwd: input.cliRoot,
+      provider: DEFAULT_PROVIDER,
+      modelId: DEFAULT_MODEL_ID,
+      prompt: buildWorkbenchChatPrompt(input),
+      apiKey: next.apiKey,
+    })
+
+    return response.text.trim() || createFallbackChatReply(input.message)
+  } catch {
+    return createFallbackChatReply(input.message)
+  }
+}
+
+function buildWorkbenchChatPrompt(input: {
+  message: string
+  currentGoal?: string
+}): string {
+  return [
+    '你是 apps/oc-pi-cli 的 interactive workbench 聊天助手。',
+    '当前阶段先只做聊天，不要直接执行任务，不要把自然语言输入解释成命令。',
+    '如果用户想真正触发任务，请提醒使用 slash command，例如 /goal-run、/status-show、/review-latest。',
+    '请用简洁中文回复。',
+    input.currentGoal ? `current goal: ${input.currentGoal}` : 'current goal: none',
+    `user message: ${input.message}`,
+  ].join('\n')
+}
+
 function buildGoalPlanPrompt(goal: string): string {
   return [
     '你是 apps/oc-pi-cli 的工作台规划助手。',
@@ -362,6 +440,10 @@ function createFallbackPlan(goal: string): GoalPlanDraft {
       shouldWrite ? '执行并输出结果文件摘要' : '预览结果并等待下一步确认',
     ],
   }
+}
+
+function createFallbackChatReply(message: string): string {
+  return `我已收到你的消息：${message}。当前自然语言输入先作为聊天处理；如果你想生成执行方案，请输入 /goal-run。`
 }
 
 function appendSystemMessage(
