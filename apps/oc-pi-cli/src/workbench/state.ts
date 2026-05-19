@@ -83,6 +83,7 @@ export function createWorkbenchExecutionState(): WorkbenchExecutionState {
     touchedFiles: [],
     executionBoundary: 'preview',
     requestedArtifactMode: 'preview',
+    thinkingCollapsed: true,
   }
 }
 
@@ -197,6 +198,7 @@ export function setWorkbenchPlanDraft(
       requestedArtifactMode: input.requestedArtifactMode,
       pendingAssistantMessage: undefined,
       thinkingText: undefined,
+      thinkingCollapsed: state.execution.thinkingCollapsed,
     },
   }
 }
@@ -211,6 +213,7 @@ export function clearWorkbenchPendingExecution(state: WorkbenchState): Workbench
       requestedArtifactMode: 'preview',
       pendingAssistantMessage: undefined,
       thinkingText: undefined,
+      thinkingCollapsed: state.execution.thinkingCollapsed,
     },
   }
 }
@@ -227,6 +230,7 @@ export function startWorkbenchAssistantReply(
         latestAction: '',
         pendingAssistantMessage: '',
         thinkingText: '',
+        thinkingCollapsed: state.execution.thinkingCollapsed,
       },
     },
     {
@@ -279,6 +283,7 @@ export function finishWorkbenchAssistantReply(
       latestAction: reply,
       pendingAssistantMessage: undefined,
       thinkingText: undefined,
+      thinkingCollapsed: state.execution.thinkingCollapsed,
     },
   }
 }
@@ -326,6 +331,16 @@ export function updateWorkbenchAssistantThinkingDelta(
     execution: {
       ...state.execution,
       thinkingText: `${state.execution.thinkingText ?? ''}${delta}`,
+    },
+  }
+}
+
+export function toggleWorkbenchThinkingCollapsed(state: WorkbenchState): WorkbenchState {
+  return {
+    ...state,
+    execution: {
+      ...state.execution,
+      thinkingCollapsed: !state.execution.thinkingCollapsed,
     },
   }
 }

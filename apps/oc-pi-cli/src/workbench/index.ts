@@ -23,6 +23,7 @@ import {
   handleStatusShow,
   markAssistantReplyPending,
 } from '@/workbench/controller/index.js'
+import { toggleWorkbenchThinkingCollapsed } from '@/workbench/state.js'
 import { WorkbenchRootView } from '@/workbench/views/index.js'
 
 export interface StartWorkbenchOptions {
@@ -261,7 +262,16 @@ async function handleWorkbenchCommand(input: {
 
     case '/help-show':
       return {
-        state: appendSystemMessage(input.state, 'Commands: /goal-new /confirm-execute /cancel-run /status-show /review-latest /help-show'),
+        state: appendSystemMessage(input.state, 'Commands: /goal-new /goal-run /goal-retry /confirm-execute /cancel-run /status-show /review-latest /help-show /thinking-toggle'),
+        latestRun: input.latestRun,
+      }
+
+    case '/thinking-toggle':
+      return {
+        state: appendSystemMessage(
+          toggleWorkbenchThinkingCollapsed(input.state),
+          input.state.execution.thinkingCollapsed ? 'Thinking panel expanded.' : 'Thinking panel collapsed.',
+        ),
         latestRun: input.latestRun,
       }
 

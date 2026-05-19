@@ -117,8 +117,19 @@ export class WorkbenchRootView implements Component, Focusable {
       return []
     }
 
+    if (this.state.execution.thinkingCollapsed) {
+      return [
+        truncateToWidth(
+          `Thinking (collapsed) | ${this.state.execution.thinkingText.length} chars | /thinking-toggle to expand`,
+          width,
+          '...',
+          true,
+        ),
+      ]
+    }
+
     return [
-      truncateToWidth('Thinking', width, '...', true),
+      truncateToWidth('Thinking | /thinking-toggle to collapse', width, '...', true),
       ...wrapTextWithAnsi(this.state.execution.thinkingText, width),
       ''.padEnd(width, '.'),
     ]
@@ -230,6 +241,7 @@ const WORKBENCH_COMMANDS: SlashCommand[] = [
   { name: 'status-show', description: '查看当前状态摘要' },
   { name: 'review-latest', description: '查看最近一次审查结论' },
   { name: 'help-show', description: '查看命令帮助' },
+  { name: 'thinking-toggle', description: '折叠或展开 Thinking 区' },
 ]
 
 const EDITOR_THEME = {

@@ -72,6 +72,7 @@ export interface WorkbenchExecutionState {
   requestedArtifactMode: 'preview' | 'write';
   pendingAssistantMessage?: string;
   thinkingText?: string;
+  thinkingCollapsed: boolean;
 }
 
 export interface WorkbenchStatusBarState {
