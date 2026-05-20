@@ -28,6 +28,7 @@ export interface PiPromptRequest {
   modelId: string
   prompt: string
   apiKey?: string
+  signal?: AbortSignal
 }
 
 export interface PiPromptStreamEvent {

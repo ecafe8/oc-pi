@@ -48,6 +48,7 @@ export class WorkbenchRootView implements Component, Focusable {
   private activeScrollPane: ScrollPane = "chat";
   private lastLayout: RenderLayoutMetrics | null = null;
   private inputLocked = false;
+  private cancelHintRemainingEsc = 0;
   private shimmerFrame = 0;
   private shimmerTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -130,12 +131,28 @@ export class WorkbenchRootView implements Component, Focusable {
     this.inputLocked = value;
     this.editor.focused = this._focused && !value;
 
+    if (!value) {
+      this.cancelHintRemainingEsc = 0;
+    }
+
     if (value) {
       this.startShimmer();
     } else {
       this.stopShimmer();
     }
 
+    this.invalidate();
+    this.tui.requestRender(true);
+  }
+
+  public setCancelHintRemainingEsc(value: number): void {
+    const nextValue = Math.max(0, value);
+
+    if (this.cancelHintRemainingEsc === nextValue) {
+      return;
+    }
+
+    this.cancelHintRemainingEsc = nextValue;
     this.invalidate();
     this.tui.requestRender(true);
   }
@@ -172,7 +189,7 @@ export class WorkbenchRootView implements Component, Focusable {
     const thinkingLines = this.renderThinkingLines(safeWidth);
     const composerLabel = truncateToWidth(
       this.inputLocked
-        ? `> composer: AI 处理中 | 输入已暂停, 连按 3 次 ESC 可取消 | active: ${this.activeScrollPane}`
+        ? `> composer: AI 处理中 | 输入已暂停${this.renderCancelHint()} | active: ${this.activeScrollPane}`
         : `> composer: 自然语言默认聊天 | 输入 / 查看命令补全 | ctrl+1 chat | ctrl+2 thinking | ctrl+3 info | active: ${this.activeScrollPane}`,
       safeWidth,
       "...",
@@ -355,6 +372,7 @@ export class WorkbenchRootView implements Component, Focusable {
   }
 
   private handleMouseInput(data: string): boolean {
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: 需要显式匹配 ANSI ESC 控制字符以解析鼠标转义序列
     const match = data.match(/^\u001b\[<(\d+);(\d+);(\d+)([Mm])$/);
 
     if (!match || !this.lastLayout) {
@@ -446,7 +464,12 @@ export class WorkbenchRootView implements Component, Focusable {
 
   private renderLockedComposerLines(width: number): string[] {
     const border = "".padEnd(Math.max(1, width), "─");
-    const message = truncateToWidth(` AI 处理中${this.resolveShimmerSuffix()}`, width, "...", true);
+    const message = truncateToWidth(
+      ` AI 处理中${this.resolveShimmerSuffix()}${this.renderCancelHint()}`,
+      width,
+      "...",
+      true,
+    );
 
     return [border, message.padEnd(width, " "), border];
   }
@@ -476,6 +499,18 @@ export class WorkbenchRootView implements Component, Focusable {
 
   private resolveShimmerSuffix(): string {
     return ".".repeat(this.shimmerFrame);
+  }
+
+  private renderCancelHint(): string {
+    if (!this.inputLocked) {
+      return "";
+    }
+
+    if (this.cancelHintRemainingEsc <= 0) {
+      return " | 连按 3 次 ESC 可取消";
+    }
+
+    return ` | 再按 ${this.cancelHintRemainingEsc} 次 ESC 取消`;
   }
 }
 

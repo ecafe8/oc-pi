@@ -71,6 +71,7 @@ export class PiModelAgentBridge implements PiAgentBridge {
       {
         apiKey: request.apiKey,
         reasoning: 'minimal',
+        signal: request.signal,
       },
     )
 
@@ -114,6 +115,7 @@ export class PiModelAgentBridge implements PiAgentBridge {
       {
         apiKey: request.apiKey,
         reasoning: 'minimal',
+        signal: request.signal,
       },
     )
 

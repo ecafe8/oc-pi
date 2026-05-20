@@ -1,4 +1,4 @@
-import { ProcessTerminal, TUI, matchesKey } from '@earendil-works/pi-tui'
+import { ProcessTerminal, TUI, isKeyRelease, matchesKey } from '@earendil-works/pi-tui'
 
 import {
   FileOAuthCredentialStore,
@@ -54,6 +54,9 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
   let state = session?.workbenchState ?? createDefaultWorkbenchState(options.workspacePath)
   let isBusy = false
   let hasStopped = false
+  let activeChatAbortController: AbortController | undefined
+  let escapePressCount = 0
+  let lastEscapeAt = 0
 
   const terminal = new ProcessTerminal()
   const tui = new TUI(terminal)
@@ -102,10 +105,12 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
           }
           }
         } else {
+          activeChatAbortController = new AbortController()
           const result = await handleChatInput({
             state,
             message: trimmed,
             cliRoot: getCliRootPath(),
+            signal: activeChatAbortController.signal,
             onStateChange: (nextState) => {
               state = nextState
               rootView.setState(state)
@@ -113,6 +118,10 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
             },
           })
           state = result.state
+          activeChatAbortController = undefined
+          escapePressCount = 0
+          lastEscapeAt = 0
+          rootView.setCancelHintRemainingEsc(0)
         }
 
         rootView.setState(state)
@@ -124,8 +133,12 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
         })
         session = await sessionStore.read()
       } finally {
+        activeChatAbortController = undefined
+        escapePressCount = 0
+        lastEscapeAt = 0
         isBusy = false
         rootView.setInputLocked(false)
+        rootView.setCancelHintRemainingEsc(0)
       }
     },
   })
@@ -136,6 +149,32 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
     if (matchesKey(data, 'ctrl+c')) {
       stopWorkbench()
       process.exit(0)
+    }
+
+    if (matchesKey(data, 'escape') && activeChatAbortController) {
+      if (isKeyRelease(data)) {
+        return {
+          consume: true,
+        }
+      }
+
+      const now = Date.now()
+
+      if (now - lastEscapeAt > 1500) {
+        escapePressCount = 0
+      }
+
+      lastEscapeAt = now
+      escapePressCount += 1
+      rootView.setCancelHintRemainingEsc(Math.max(0, 3 - escapePressCount))
+
+      if (escapePressCount >= 3 && !activeChatAbortController.signal.aborted) {
+        activeChatAbortController.abort()
+      }
+
+      return {
+        consume: true,
+      }
     }
 
     return undefined
@@ -188,6 +227,7 @@ async function handleChatInput(input: {
   state: import('@/workbench/types.js').WorkbenchState
   message: string
   cliRoot: string
+  signal: AbortSignal
   onStateChange: (state: import('@/workbench/types.js').WorkbenchState) => void
 }): Promise<WorkbenchActionResult> {
   const thinkingState = markAssistantReplyPending(handleChatMessage({
@@ -200,6 +240,7 @@ async function handleChatInput(input: {
     message: input.message,
     cliRoot: input.cliRoot,
     currentGoal: thinkingState.session.currentGoal,
+    signal: input.signal,
     onDelta: (delta, currentState) => {
       const nextState = appendAssistantReplyDelta(currentState, delta)
       input.onStateChange(nextState)
@@ -212,6 +253,17 @@ async function handleChatInput(input: {
     },
     initialState: thinkingState,
   })
+
+  if (reply.interrupted) {
+    const interruptedReply = reply.text.trim() || '已中断当前 AI 回复。'
+
+    return {
+      state: appendSystemMessage(
+        applyChatReply(reply.state, interruptedReply),
+        '已中断当前 AI 回复。',
+      ),
+    }
+  }
 
   return {
     state: applyChatReply(reply.state, reply.text),
@@ -405,9 +457,10 @@ async function createChatReply(input: {
   cliRoot: string
   currentGoal?: string
   initialState: import('@/workbench/types.js').WorkbenchState
+  signal: AbortSignal
   onDelta: (delta: string, state: import('@/workbench/types.js').WorkbenchState) => import('@/workbench/types.js').WorkbenchState
   onThinkingDelta: (delta: string, state: import('@/workbench/types.js').WorkbenchState) => import('@/workbench/types.js').WorkbenchState
-}): Promise<{ text: string; state: import('@/workbench/types.js').WorkbenchState }> {
+}): Promise<{ text: string; state: import('@/workbench/types.js').WorkbenchState; interrupted: boolean }> {
   try {
     const credentialStore = new FileOAuthCredentialStore()
     const loginBridge = new PiOAuthLoginBridge()
@@ -418,6 +471,7 @@ async function createChatReply(input: {
       return {
         text: createFallbackChatReply(input.message),
         state: input.initialState,
+        interrupted: false,
       }
     }
 
@@ -430,6 +484,7 @@ async function createChatReply(input: {
       return {
         text: createFallbackChatReply(input.message),
         state: input.initialState,
+        interrupted: false,
       }
     }
 
@@ -444,7 +499,9 @@ async function createChatReply(input: {
       modelId: DEFAULT_MODEL_ID,
       prompt: buildWorkbenchChatPrompt(input),
       apiKey: next.apiKey,
+      signal: input.signal,
     })) {
+
       if (event.type === 'text-delta' && event.text) {
         streamedText += event.text
         currentState = input.onDelta(event.text, currentState)
@@ -458,11 +515,13 @@ async function createChatReply(input: {
     return {
       text: streamedText.trim() || createFallbackChatReply(input.message),
       state: currentState,
+      interrupted: input.signal.aborted,
     }
   } catch {
     return {
       text: createFallbackChatReply(input.message),
       state: input.initialState,
+      interrupted: input.signal.aborted,
     }
   }
 }
