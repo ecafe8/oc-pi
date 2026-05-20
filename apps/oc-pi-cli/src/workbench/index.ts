@@ -63,6 +63,7 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
     }
 
     hasStopped = true
+    rootView.dispose()
     stopWorkbenchTui(tui)
   }
   const rootView = new WorkbenchRootView({
@@ -77,6 +78,7 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
       }
 
       isBusy = true
+      rootView.setInputLocked(true)
 
       try {
         if (trimmed.startsWith('/')) {
@@ -123,6 +125,7 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
         session = await sessionStore.read()
       } finally {
         isBusy = false
+        rootView.setInputLocked(false)
       }
     },
   })
