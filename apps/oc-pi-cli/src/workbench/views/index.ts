@@ -206,7 +206,7 @@ export class WorkbenchRootView implements Component, Focusable {
     });
 
     const topBarLine = truncateToWidth(
-      `model: ${view.topBar.modelId} | ctx: ${view.topBar.contextSummary} | version: ${view.topBar.appVersion} | mode: ${view.topBar.mode} | status: ${view.topBar.runtimeStatus}`,
+      `session: ${view.topBar.sessionName ?? view.topBar.sessionId ?? 'none'} | model: ${view.topBar.modelId} | ctx: ${view.topBar.contextSummary} | version: ${view.topBar.appVersion} | mode: ${view.topBar.mode} | status: ${view.topBar.runtimeStatus}`,
       safeWidth,
       "...",
       true,
@@ -292,6 +292,7 @@ export class WorkbenchRootView implements Component, Focusable {
       this.decoratePaneTitle("Info", "info", width),
       "",
       "Project",
+      ...wrapTextWithAnsi(`session: ${view.rightPane.projectInfo.sessionName ?? view.rightPane.projectInfo.sessionId ?? 'none'}`, width),
       ...wrapTextWithAnsi(`workspace: ${view.rightPane.projectInfo.workspacePath}`, width),
       ...wrapTextWithAnsi(`goal: ${view.rightPane.projectInfo.goalSummary ?? "none"}`, width),
       `stage: ${view.rightPane.projectInfo.currentStageId}`,
@@ -552,6 +553,10 @@ export class WorkbenchRootView implements Component, Focusable {
 }
 
 const WORKBENCH_COMMANDS: SlashCommand[] = [
+  { name: "session-new", description: "创建并切换到新会话，可选填写会话名" },
+  { name: "session-list", description: "列出当前项目可恢复会话与最近目标摘要" },
+  { name: "session-resume", description: "恢复指定 session id 或路径对应的会话" },
+  { name: "session-fork", description: "从当前会话或指定会话创建分支会话" },
   { name: "docs-goal-new", description: "规划新的文档目标，准备输入或替换当前 goal" },
   { name: "docs-plan-run", description: "为当前文档目标生成 AI 执行方案，不直接写文件" },
   { name: "docs-plan-retry", description: "重新规划当前文档方案，覆盖已有计划草稿" },

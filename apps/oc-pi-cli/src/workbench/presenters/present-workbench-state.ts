@@ -3,6 +3,8 @@ import type { WorkbenchState } from '@/workbench/types.js'
 
 export interface PresentedWorkbenchState {
   topBar: {
+    sessionId?: string
+    sessionName?: string
     modelId: string
     currentTokens: number
     maxTokens: number
@@ -25,6 +27,8 @@ export interface PresentedWorkbenchState {
   }
   rightPane: {
     projectInfo: {
+      sessionId?: string
+      sessionName?: string
       workspacePath: string
       goalSummary?: string
       currentStageId: string
@@ -74,6 +78,8 @@ export function presentWorkbenchState(
 
   return {
     topBar: {
+      sessionId: state.session.sessionId,
+      sessionName: state.session.sessionName,
       modelId: state.context.modelId,
       currentTokens: state.context.currentTokens,
       maxTokens: state.context.maxTokens,
@@ -96,6 +102,8 @@ export function presentWorkbenchState(
     },
     rightPane: {
       projectInfo: {
+        sessionId: state.session.sessionId,
+        sessionName: state.session.sessionName,
         workspacePath: state.session.workspacePath,
         goalSummary: state.session.currentGoal ?? latestGoalItem?.summary,
         currentStageId: state.session.currentStageId,

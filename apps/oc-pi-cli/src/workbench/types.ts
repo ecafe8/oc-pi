@@ -19,6 +19,10 @@ export interface TimelineItem {
 
 export interface WorkbenchSessionState {
   workspacePath: string;
+  sessionId?: string;
+  sessionName?: string;
+  sessionFile?: string;
+  parentSessionId?: string;
   mode: WorkMode;
   currentStageId: StageId;
   currentStageStatus: StageStatus;

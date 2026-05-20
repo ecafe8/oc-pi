@@ -9,7 +9,10 @@ import { type ArtifactMode, runGoalToDocsMvp } from '@/planning/goal-to-docs/run
 import type { GoalToDocsRunRecord } from '@/planning/goal-to-docs/types.js'
 import { createDefaultWorkbenchState } from '@/runtime/default-config.js'
 import { getCliRootPath } from '@/runtime/paths.js'
-import { FileRuntimeSessionStore } from '@/runtime/session-store.js'
+import {
+  FileRuntimeSessionStore,
+  type RuntimeSessionListItem,
+} from '@/runtime/session-store.js'
 import {
   appendAssistantReplyDelta,
   appendAssistantThinkingDelta,
@@ -28,6 +31,15 @@ import { WorkbenchRootView } from '@/workbench/views/index.js'
 
 export interface StartWorkbenchOptions {
   workspacePath: string
+}
+
+interface SessionCommandContext {
+  sessionStore: FileRuntimeSessionStore
+}
+
+interface ParsedWorkbenchCommand {
+  commandName: string
+  argumentText?: string
 }
 
 interface GoalPlanDraft {
@@ -85,7 +97,8 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
 
       try {
         if (trimmed.startsWith('/')) {
-          const viewCommand = rootView.handleViewCommand(trimmed)
+          const parsedCommand = parseWorkbenchCommand(trimmed)
+          const viewCommand = rootView.handleViewCommand(parsedCommand.commandName)
 
           if (viewCommand.handled) {
             if (viewCommand.message) {
@@ -94,9 +107,12 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
           } else {
           const result = await handleWorkbenchCommand({
             state,
-            input: trimmed,
+            input: parsedCommand,
             cliRoot: getCliRootPath(),
             latestRun: session?.latestRun,
+            sessionContext: {
+              sessionStore,
+            },
           })
           state = result.state
           session = {
@@ -124,8 +140,8 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
           rootView.setCancelHintRemainingEsc(0)
         }
 
-        rootView.setState(state)
-        tui.requestRender(true)
+      rootView.setState(state)
+      tui.requestRender(true)
 
         await sessionStore.write({
           workbenchState: state,
@@ -272,11 +288,63 @@ async function handleChatInput(input: {
 
 async function handleWorkbenchCommand(input: {
   state: import('@/workbench/types.js').WorkbenchState
-  input: string
+  input: ParsedWorkbenchCommand
   cliRoot: string
   latestRun?: import('@/planning/goal-to-docs/types.js').GoalToDocsRunRecord
+  sessionContext: SessionCommandContext
 }): Promise<WorkbenchActionResult> {
-  switch (input.input) {
+  switch (input.input.commandName) {
+    case '/session-new': {
+      const nextSession = await input.sessionContext.sessionStore.createSession(
+        input.input.argumentText || 'New Workbench Session',
+      )
+
+      return {
+        state: appendSystemMessage(nextSession.workbenchState, `Switched to new session: ${nextSession.workbenchState.session.sessionId ?? 'unknown'}`),
+        latestRun: nextSession.latestRun,
+      }
+    }
+
+    case '/session-list': {
+      const sessions = await input.sessionContext.sessionStore.listSessions()
+
+      return {
+        state: appendSystemMessage(input.state, formatSessionListSummary(sessions)),
+        latestRun: input.latestRun,
+      }
+    }
+
+    case '/session-resume': {
+      if (!input.input.argumentText?.trim()) {
+        return {
+          state: appendSystemMessage(input.state, 'Usage: /session-resume <session-id-or-path>. Use /session-list first.'),
+          latestRun: input.latestRun,
+        }
+      }
+
+      const resumed = await input.sessionContext.sessionStore.resumeSession(input.input.argumentText.trim())
+
+      return {
+        state: appendSystemMessage(resumed.workbenchState, `Resumed session: ${resumed.workbenchState.session.sessionId ?? 'unknown'}`),
+        latestRun: resumed.latestRun,
+      }
+    }
+
+    case '/session-fork': {
+      const forked = await input.sessionContext.sessionStore.forkSession(
+        input.input.argumentText?.trim() || input.state.session.sessionId,
+        `Fork of ${input.state.session.sessionName ?? input.state.session.sessionId ?? 'session'}`,
+      )
+
+      return {
+        state: appendSystemMessage(
+          forked.workbenchState,
+          `Forked session: ${forked.workbenchState.session.sessionId ?? 'unknown'} from ${input.state.session.sessionId ?? 'unknown'}`,
+        ),
+        latestRun: forked.latestRun,
+      }
+    }
+
     case '/docs-exec-confirm': {
       const confirmed = handleConfirmExecute(input.state)
 
@@ -356,7 +424,7 @@ async function handleWorkbenchCommand(input: {
       return {
         state: appendSystemMessage(
           input.state,
-          'Commands: /docs-goal-new 规划新的文档目标； /docs-plan-run 生成文档执行方案； /docs-plan-retry 重新规划当前方案； /docs-exec-confirm 确认方案并执行写入； /docs-exec-cancel 取消待执行方案； /docs-status-show 查看状态与执行边界； /docs-review-latest 查看最近审查结论； /workbench-help-show 查看命令帮助； /workbench-thinking-toggle 折叠或展开 Thinking 区； /workbench-pane-chat-focus 聚焦聊天区； /workbench-pane-thinking-focus 聚焦 Thinking 区； /workbench-pane-info-focus 聚焦信息区',
+          'Commands: /session-new [name] 创建并切换新会话； /session-list 列出当前项目会话； /session-resume <session-id-or-path> 恢复指定会话； /session-fork [session-id-or-path] 从会话创建分支； /docs-goal-new 规划新的文档目标； /docs-plan-run 生成文档执行方案； /docs-plan-retry 重新规划当前方案； /docs-exec-confirm 确认方案并执行写入； /docs-exec-cancel 取消待执行方案； /docs-status-show 查看状态与执行边界； /docs-review-latest 查看最近审查结论； /workbench-help-show 查看命令帮助； /workbench-thinking-toggle 折叠或展开 Thinking 区； /workbench-pane-chat-focus 聚焦聊天区； /workbench-pane-thinking-focus 聚焦 Thinking 区； /workbench-pane-info-focus 聚焦信息区',
         ),
         latestRun: input.latestRun,
       }
@@ -410,9 +478,18 @@ async function handleWorkbenchCommand(input: {
 
     default:
       return {
-        state: appendSystemMessage(input.state, `Unknown command: ${input.input}`),
+        state: appendSystemMessage(input.state, `Unknown command: ${input.input.commandName}`),
         latestRun: input.latestRun,
       }
+  }
+}
+
+function parseWorkbenchCommand(input: string): ParsedWorkbenchCommand {
+  const [commandName, ...argumentParts] = input.trim().split(/\s+/)
+
+  return {
+    commandName: commandName ?? input.trim(),
+    argumentText: argumentParts.length > 0 ? argumentParts.join(' ') : undefined,
   }
 }
 
@@ -625,4 +702,20 @@ function appendSystemMessage(
       ],
     },
   }
+}
+
+function formatSessionListSummary(sessions: RuntimeSessionListItem[]): string {
+  if (sessions.length === 0) {
+    return 'No sessions available for current workspace.'
+  }
+
+  return sessions
+    .map((session) => {
+      const current = session.isCurrent ? ' [current]' : ''
+      const name = session.sessionName ? ` ${session.sessionName}` : ''
+      const goal = session.goalSummary ? ` | goal: ${session.goalSummary}` : ''
+
+      return `${session.sessionId}${current}${name} | updated: ${session.updatedAt}${goal}`
+    })
+    .join(' || ')
 }
