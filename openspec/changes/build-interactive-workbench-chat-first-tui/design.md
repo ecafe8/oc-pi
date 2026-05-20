@@ -38,7 +38,7 @@ Pi 侧已经提供了足够的 TUI 基础设施：`TUI`、`ProcessTerminal`、`E
 
 ### Decision 2: 保留自然语言输入为主，同时引入单段 slash command
 
-采纳方案：显式命令统一采用 `/goal-new`、`/status-show`、`/review-latest` 这种 `kebab-case 连字符命名` 单段命令，而不是 `/goal new` 层级命令。
+采纳方案：显式命令统一采用 `/docs-goal-new`、`/docs-status-show`、`/docs-review-latest` 这种 `kebab-case 连字符命名` 单段命令，而不是 `/goal new` 层级命令。
 
 理由：
 - 更适合 TUI 输入框补全与解析。

@@ -9,7 +9,7 @@
 - 为工作台补齐第一版必须的状态模型，包括 `context 上下文`、`plan 执行计划`、`execution 执行过程` 与 `waiting-user 等待用户确认` 状态。
 - 为工作台建立稳定的 presenter 展示适配层，输出顶部状态、聊天消息流、右侧项目信息/计划/执行摘要。
 - 基于仓库已存在的 `@earendil-works/pi-tui` 依赖搭建最小 TUI 外壳，并通过统一 CLI 入口进入。
-- 定义第一版 `slash command 斜杠命令` 规范，统一采用 `/goal-new` 这类 `kebab-case 连字符命名` 单段命令，而不是 `/goal new` 这种层级命令。
+- 定义第一版 `slash command 斜杠命令` 规范，统一采用 `/docs-goal-new` 这类 `kebab-case 连字符命名` 单段命令，而不是 `/goal new` 这种层级命令。
 - 将 `goal-to-docs 目标到文档` 接入“AI 先给方案、用户确认后执行、执行过程可见、结果文件可见”的最小交互闭环。
 - Out of Scope
 - 不在第一版中做自由多窗格系统、复杂 artifact diff viewer 差异查看器、artifact 原地编辑、多会话分支管理或默认真实 docs 写入主路径。

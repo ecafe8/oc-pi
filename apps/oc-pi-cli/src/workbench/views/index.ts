@@ -166,17 +166,17 @@ export class WorkbenchRootView implements Component, Focusable {
   }
 
   public handleViewCommand(command: string): WorkbenchViewCommandResult {
-    if (command === "/pane-chat") {
+    if (command === "/workbench-pane-chat-focus") {
       this.activeScrollPane = "chat";
       return { handled: true, message: "Active scroll pane: chat" };
     }
 
-    if (command === "/pane-thinking") {
+    if (command === "/workbench-pane-thinking-focus") {
       this.activeScrollPane = "thinking";
       return { handled: true, message: "Active scroll pane: thinking" };
     }
 
-    if (command === "/pane-info") {
+    if (command === "/workbench-pane-info-focus") {
       this.activeScrollPane = "info";
       return { handled: true, message: "Active scroll pane: info" };
     }
@@ -253,7 +253,7 @@ export class WorkbenchRootView implements Component, Focusable {
     if (this.state.execution.thinkingCollapsed) {
       return [
         this.decoratePaneTitle(
-          `Thinking (collapsed) | ${this.state.execution.thinkingText.length} chars | /thinking-toggle to expand`,
+          `Thinking (collapsed) | ${this.state.execution.thinkingText.length} chars | /workbench-thinking-toggle to expand`,
           "thinking",
           width,
         ),
@@ -261,7 +261,7 @@ export class WorkbenchRootView implements Component, Focusable {
     }
 
     const allLines = [
-      this.decoratePaneTitle("Thinking | /thinking-toggle to collapse", "thinking", width),
+      this.decoratePaneTitle("Thinking | /workbench-thinking-toggle to collapse", "thinking", width),
       ...wrapTextWithAnsi(this.state.execution.thinkingText, width),
     ];
     const visibleThinkingLines = this.slicePaneLines("thinking", allLines, 6);
@@ -552,18 +552,18 @@ export class WorkbenchRootView implements Component, Focusable {
 }
 
 const WORKBENCH_COMMANDS: SlashCommand[] = [
-  { name: "goal-new", description: "设置新的 goal 目标" },
-  { name: "goal-run", description: "基于当前 goal 生成执行方案" },
-  { name: "goal-retry", description: "重新生成当前 goal 的方案" },
-  { name: "confirm-execute", description: "确认当前方案并开始执行" },
-  { name: "cancel-run", description: "取消待执行方案" },
-  { name: "status-show", description: "查看当前状态摘要" },
-  { name: "review-latest", description: "查看最近一次审查结论" },
-  { name: "help-show", description: "查看命令帮助" },
-  { name: "thinking-toggle", description: "折叠或展开 Thinking 区" },
-  { name: "pane-chat", description: "将滚动焦点切到聊天区" },
-  { name: "pane-thinking", description: "将滚动焦点切到 Thinking 区" },
-  { name: "pane-info", description: "将滚动焦点切到右侧信息区" },
+  { name: "docs-goal-new", description: "设置新的 docs goal 目标" },
+  { name: "docs-plan-run", description: "基于当前 docs goal 生成执行方案" },
+  { name: "docs-plan-retry", description: "重新生成当前 docs 方案" },
+  { name: "docs-exec-confirm", description: "确认当前 docs 方案并开始执行" },
+  { name: "docs-exec-cancel", description: "取消待执行的 docs 方案" },
+  { name: "docs-status-show", description: "查看当前 docs 工作流状态摘要" },
+  { name: "docs-review-latest", description: "查看最近一次 docs 审查结论" },
+  { name: "workbench-help-show", description: "查看 workbench 命令帮助" },
+  { name: "workbench-thinking-toggle", description: "折叠或展开 Thinking 区" },
+  { name: "workbench-pane-chat-focus", description: "将滚动焦点切到聊天区" },
+  { name: "workbench-pane-thinking-focus", description: "将滚动焦点切到 Thinking 区" },
+  { name: "workbench-pane-info-focus", description: "将滚动焦点切到右侧信息区" },
 ];
 
 const EDITOR_THEME = {

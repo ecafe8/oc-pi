@@ -36,6 +36,6 @@
 
 ## 7. 斜杠命令与验证
 
-- [ ] 7.1 按 `apps/web-docs/content/docs/planning/interactive-workbench.md` 中的规则，为工作台输入区建立第一版 `kebab-case` 单段 slash command 规范，至少覆盖 `/goal-new`、`/status-show`、`/review-latest`、`/confirm-execute`、`/cancel-run`。
+- [ ] 7.1 按 `apps/web-docs/content/docs/planning/interactive-workbench.md` 中的规则，为工作台输入区建立第一版 `kebab-case` 单段 slash command 规范，至少覆盖 `/docs-goal-new`、`/docs-status-show`、`/docs-review-latest`、`/docs-exec-confirm`、`/docs-exec-cancel`。
 - [ ] 7.2 执行 `bun run types:check`（`apps/oc-pi-cli`），确认工作台状态模型、presenter、TUI 入口与控制流改动后的类型检查通过。
 - [ ] 7.3 执行一次最小工作台启动验证，确认用户可以进入 TUI，并能走通“AI 给方案 -> waiting-user -> 用户确认 -> 执行 -> 结果文件可见”的最小闭环。

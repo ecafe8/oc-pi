@@ -43,10 +43,10 @@
 - **THEN** 系统 MUST 在用户可见区域展示至少一条结果文件路径或计划写入文件路径
 
 ### Requirement: Workbench SHALL support explicit slash commands using kebab-case single-token syntax
-系统 MUST 为第一版工作台提供显式 `slash command 斜杠命令`，并统一采用 `/goal-new` 这种 `kebab-case 连字符命名` 单段语法，而不是空格层级命令。
+系统 MUST 为第一版工作台提供显式 `slash command 斜杠命令`，并统一采用 `/docs-goal-new` 这种 `kebab-case 连字符命名` 单段语法，而不是空格层级命令。
 
 #### Scenario: Kebab-case slash command is accepted
-- **WHEN** 用户在输入区输入 `/goal-new`、`/status-show` 或 `/review-latest`
+- **WHEN** 用户在输入区输入 `/docs-goal-new`、`/docs-status-show` 或 `/docs-review-latest`
 - **THEN** 系统 MUST 将其识别为显式结构化动作
 
 #### Scenario: Space-separated slash command is not the source-of-truth syntax
@@ -54,7 +54,7 @@
 - **THEN** 系统 MUST NOT 把 `/goal new` 作为当前真源语法
 
 #### Scenario: Goal command enters goal input mode
-- **WHEN** 用户输入 `/goal-new`
+- **WHEN** 用户输入 `/docs-goal-new`
 - **THEN** 系统 MUST 进入 `goal input mode 目标输入模式`
 - **THEN** 随后的编辑器正文 MUST 被视为新的 goal 文本，而不是要求同一行内携带大段 inline 参数
 

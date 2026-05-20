@@ -277,7 +277,7 @@ async function handleWorkbenchCommand(input: {
   latestRun?: import('@/planning/goal-to-docs/types.js').GoalToDocsRunRecord
 }): Promise<WorkbenchActionResult> {
   switch (input.input) {
-    case '/confirm-execute': {
+    case '/docs-exec-confirm': {
       const confirmed = handleConfirmExecute(input.state)
 
       if (!confirmed.canExecute || !confirmed.goal) {
@@ -302,13 +302,13 @@ async function handleWorkbenchCommand(input: {
       }
     }
 
-    case '/cancel-run':
+    case '/docs-exec-cancel':
       return {
         state: handleCancelRun(input.state),
         latestRun: input.latestRun,
       }
 
-    case '/status-show': {
+    case '/docs-status-show': {
       const result = handleStatusShow(input.state)
 
       return {
@@ -330,7 +330,7 @@ async function handleWorkbenchCommand(input: {
       }
     }
 
-    case '/review-latest': {
+    case '/docs-review-latest': {
       const result = handleReviewLatest(input.state)
 
       return {
@@ -352,13 +352,13 @@ async function handleWorkbenchCommand(input: {
       }
     }
 
-    case '/help-show':
+    case '/workbench-help-show':
       return {
-        state: appendSystemMessage(input.state, 'Commands: /goal-new /goal-run /goal-retry /confirm-execute /cancel-run /status-show /review-latest /help-show /thinking-toggle /pane-chat /pane-thinking /pane-info'),
+        state: appendSystemMessage(input.state, 'Commands: /docs-goal-new /docs-plan-run /docs-plan-retry /docs-exec-confirm /docs-exec-cancel /docs-status-show /docs-review-latest /workbench-help-show /workbench-thinking-toggle /workbench-pane-chat-focus /workbench-pane-thinking-focus /workbench-pane-info-focus'),
         latestRun: input.latestRun,
       }
 
-    case '/thinking-toggle':
+    case '/workbench-thinking-toggle':
       return {
         state: appendSystemMessage(
           toggleWorkbenchThinkingCollapsed(input.state),
@@ -367,13 +367,13 @@ async function handleWorkbenchCommand(input: {
         latestRun: input.latestRun,
       }
 
-    case '/goal-new':
+    case '/docs-goal-new':
       return {
-        state: appendSystemMessage(input.state, '已准备新的 goal。接下来请用自然语言描述目标，再用 /goal-run 生成执行方案。'),
+        state: appendSystemMessage(input.state, '已准备新的 docs goal。接下来请用自然语言描述目标，再用 /docs-plan-run 生成执行方案。'),
         latestRun: input.latestRun,
       }
 
-    case '/goal-run': {
+    case '/docs-plan-run': {
       if (!input.state.session.currentGoal) {
         return {
           state: appendSystemMessage(input.state, 'No current goal. 请先输入目标文本。'),
@@ -388,7 +388,7 @@ async function handleWorkbenchCommand(input: {
       })
     }
 
-    case '/goal-retry': {
+    case '/docs-plan-retry': {
       if (!input.state.session.currentGoal) {
         return {
           state: appendSystemMessage(input.state, 'No current goal to retry.'),
@@ -533,7 +533,7 @@ function buildWorkbenchChatPrompt(input: {
   return [
     '你是 apps/oc-pi-cli 的 interactive workbench 聊天助手。',
     '当前阶段先只做聊天，不要直接执行任务，不要把自然语言输入解释成命令。',
-    '如果用户想真正触发任务，请提醒使用 slash command，例如 /goal-run、/status-show、/review-latest。',
+    '如果用户想真正触发任务，请提醒使用 slash command，例如 /docs-plan-run、/docs-status-show、/docs-review-latest。',
     '请用简洁中文回复。',
     input.currentGoal ? `current goal: ${input.currentGoal}` : 'current goal: none',
     `user message: ${input.message}`,
@@ -601,7 +601,7 @@ function createFallbackPlan(goal: string): GoalPlanDraft {
 }
 
 function createFallbackChatReply(message: string): string {
-  return `我已收到你的消息：${message}。当前自然语言输入先作为聊天处理；如果你想生成执行方案，请输入 /goal-run。`
+  return `我已收到你的消息：${message}。当前自然语言输入先作为聊天处理；如果你想生成执行方案，请输入 /docs-plan-run。`
 }
 
 function appendSystemMessage(
