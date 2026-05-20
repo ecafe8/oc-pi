@@ -45,6 +45,9 @@ export class WorkbenchRootView implements Component, Focusable {
   private chatScrollOffset = 0;
   private thinkingScrollOffset = 0;
   private infoScrollOffset = 0;
+  private autoFollowChat = true;
+  private lastChatSignature = "";
+  private lastChatMaxOffset = 0;
   private activeScrollPane: ScrollPane = "chat";
   private lastLayout: RenderLayoutMetrics | null = null;
   private inputLocked = false;
@@ -78,6 +81,7 @@ export class WorkbenchRootView implements Component, Focusable {
   private _focused = false;
 
   public setState(state: WorkbenchState): void {
+    this.syncChatAutoFollow(state);
     this.state = state;
     this.invalidate();
   }
@@ -350,6 +354,12 @@ export class WorkbenchRootView implements Component, Focusable {
 
     const maxOffset = Math.max(0, lines.length - visibleHeight);
     if (pane === "chat") {
+      this.lastChatMaxOffset = maxOffset;
+
+      if (this.autoFollowChat) {
+        this.chatScrollOffset = maxOffset;
+      }
+
       this.chatScrollOffset = Math.min(this.chatScrollOffset, maxOffset);
     }
 
@@ -368,7 +378,7 @@ export class WorkbenchRootView implements Component, Focusable {
   }
 
   private scrollActivePane(delta: number): void {
-    this.scrollPane(this.activeScrollPane, delta);
+    this.scrollPane(this.activeScrollPane, delta, true);
   }
 
   private handleMouseInput(data: string): boolean {
@@ -401,7 +411,7 @@ export class WorkbenchRootView implements Component, Focusable {
     }
 
     this.activeScrollPane = pane;
-    this.scrollPane(pane, wheelCode === 0 ? -3 : 3);
+    this.scrollPane(pane, wheelCode === 0 ? -3 : 3, true);
     this.tui.requestRender(true);
 
     return true;
@@ -427,9 +437,19 @@ export class WorkbenchRootView implements Component, Focusable {
     return null;
   }
 
-  private scrollPane(pane: ScrollPane, delta: number): void {
+  private scrollPane(pane: ScrollPane, delta: number, isUserDriven: boolean): void {
     if (pane === "chat") {
       this.chatScrollOffset = Math.max(0, this.chatScrollOffset + delta);
+
+      if (isUserDriven && delta < 0) {
+        this.autoFollowChat = false;
+      }
+
+      if (this.chatScrollOffset >= this.lastChatMaxOffset) {
+        this.chatScrollOffset = this.lastChatMaxOffset;
+        this.autoFollowChat = true;
+      }
+
       return;
     }
 
@@ -511,6 +531,23 @@ export class WorkbenchRootView implements Component, Focusable {
     }
 
     return ` | 再按 ${this.cancelHintRemainingEsc} 次 ESC 取消`;
+  }
+
+  private syncChatAutoFollow(state: WorkbenchState): void {
+    const nextChatSignature = state.timeline.items
+      .filter((item) => item.messageType === "user" || item.messageType?.startsWith("assistant"))
+      .map((item) => `${item.createdAt}:${item.summary}:${item.isStreaming ? "1" : "0"}`)
+      .join("\n");
+
+    if (nextChatSignature === this.lastChatSignature) {
+      return;
+    }
+
+    this.lastChatSignature = nextChatSignature;
+
+    if (this.autoFollowChat) {
+      this.chatScrollOffset = Number.MAX_SAFE_INTEGER;
+    }
   }
 }
 
