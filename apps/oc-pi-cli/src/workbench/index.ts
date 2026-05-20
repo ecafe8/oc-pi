@@ -37,7 +37,7 @@ interface SessionCommandContext {
   sessionStore: FileRuntimeSessionStore
 }
 
-interface ParsedWorkbenchCommand {
+export interface ParsedWorkbenchCommand {
   commandName: string
   argumentText?: string
 }
@@ -105,14 +105,12 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
               state = appendSystemMessage(state, viewCommand.message)
             }
           } else {
-          const result = await handleWorkbenchCommand({
+          const result = await executeWorkbenchSlashCommand({
             state,
-            input: parsedCommand,
+            command: parsedCommand,
             cliRoot: getCliRootPath(),
             latestRun: session?.latestRun,
-            sessionContext: {
-              sessionStore,
-            },
+            sessionStore,
           })
           state = result.state
           session = {
@@ -284,6 +282,28 @@ async function handleChatInput(input: {
   return {
     state: applyChatReply(reply.state, reply.text),
   }
+}
+
+export async function executeWorkbenchSlashCommand(input: {
+  state: import('@/workbench/types.js').WorkbenchState
+  command: ParsedWorkbenchCommand | string
+  cliRoot: string
+  latestRun?: import('@/planning/goal-to-docs/types.js').GoalToDocsRunRecord
+  sessionStore: FileRuntimeSessionStore
+}): Promise<WorkbenchActionResult> {
+  const parsedCommand = typeof input.command === 'string'
+    ? parseWorkbenchCommand(input.command)
+    : input.command
+
+  return handleWorkbenchCommand({
+    state: input.state,
+    input: parsedCommand,
+    cliRoot: input.cliRoot,
+    latestRun: input.latestRun,
+    sessionContext: {
+      sessionStore: input.sessionStore,
+    },
+  })
 }
 
 async function handleWorkbenchCommand(input: {
@@ -484,7 +504,7 @@ async function handleWorkbenchCommand(input: {
   }
 }
 
-function parseWorkbenchCommand(input: string): ParsedWorkbenchCommand {
+export function parseWorkbenchCommand(input: string): ParsedWorkbenchCommand {
   const [commandName, ...argumentParts] = input.trim().split(/\s+/)
 
   return {
