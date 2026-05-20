@@ -354,7 +354,10 @@ async function handleWorkbenchCommand(input: {
 
     case '/workbench-help-show':
       return {
-        state: appendSystemMessage(input.state, 'Commands: /docs-goal-new /docs-plan-run /docs-plan-retry /docs-exec-confirm /docs-exec-cancel /docs-status-show /docs-review-latest /workbench-help-show /workbench-thinking-toggle /workbench-pane-chat-focus /workbench-pane-thinking-focus /workbench-pane-info-focus'),
+        state: appendSystemMessage(
+          input.state,
+          'Commands: /docs-goal-new 规划新的文档目标； /docs-plan-run 生成文档执行方案； /docs-plan-retry 重新规划当前方案； /docs-exec-confirm 确认方案并执行写入； /docs-exec-cancel 取消待执行方案； /docs-status-show 查看状态与执行边界； /docs-review-latest 查看最近审查结论； /workbench-help-show 查看命令帮助； /workbench-thinking-toggle 折叠或展开 Thinking 区； /workbench-pane-chat-focus 聚焦聊天区； /workbench-pane-thinking-focus 聚焦 Thinking 区； /workbench-pane-info-focus 聚焦信息区',
+        ),
         latestRun: input.latestRun,
       }
 
