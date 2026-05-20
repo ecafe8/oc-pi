@@ -18,6 +18,14 @@ const MIN_INFO_PANE_WIDTH = 28
 const INFO_PANE_RATIO = 0.34
 type ScrollPane = 'chat' | 'thinking' | 'info'
 
+interface RenderLayoutMetrics {
+  bodyStartRow: number
+  bodyHeight: number
+  chatWidth: number
+  thinkingStartRow: number
+  thinkingHeight: number
+}
+
 export interface WorkbenchRootViewOptions {
   tui: TUI
   workspacePath: string
@@ -32,13 +40,16 @@ export interface WorkbenchViewCommandResult {
 
 export class WorkbenchRootView implements Component, Focusable {
   private readonly editor: Editor
+  private readonly tui: TUI
   private state: WorkbenchState
   private chatScrollOffset = 0
   private thinkingScrollOffset = 0
   private infoScrollOffset = 0
   private activeScrollPane: ScrollPane = 'chat'
+  private lastLayout: RenderLayoutMetrics | null = null
 
   public constructor(options: WorkbenchRootViewOptions) {
+    this.tui = options.tui
     this.state = options.state
     this.editor = new Editor(options.tui, EDITOR_THEME, {
       paddingX: 0,
@@ -70,6 +81,10 @@ export class WorkbenchRootView implements Component, Focusable {
   }
 
   public handleInput(data: string): void {
+    if (this.handleMouseInput(data)) {
+      return
+    }
+
     if (matchesKey(data, Key.ctrl('1'))) {
       this.activeScrollPane = 'chat'
       return
@@ -136,7 +151,6 @@ export class WorkbenchRootView implements Component, Focusable {
     )
     const composerLines = this.editor.render(Math.max(20, safeWidth))
     const bodyViewportHeight = this.resolveBodyViewportHeight({
-      totalWidth: safeWidth,
       thinkingLines,
       composerLines,
     })
@@ -154,6 +168,14 @@ export class WorkbenchRootView implements Component, Focusable {
     const visibleInfoLines = this.slicePaneLines('info', infoLines, bodyViewportHeight)
     const rowCount = Math.max(bodyViewportHeight, visibleChatLines.length, visibleInfoLines.length)
     const bodyLines: string[] = []
+
+    this.lastLayout = {
+      bodyStartRow: 3,
+      bodyHeight: rowCount,
+      chatWidth,
+      thinkingStartRow: 4 + rowCount,
+      thinkingHeight: thinkingLines.length,
+    }
 
     for (let index = 0; index < rowCount; index += 1) {
       const left = truncateToWidth(visibleChatLines[index] ?? '', chatWidth, '...', true)
@@ -309,12 +331,71 @@ export class WorkbenchRootView implements Component, Focusable {
   }
 
   private scrollActivePane(delta: number): void {
-    if (this.activeScrollPane === 'chat') {
+    this.scrollPane(this.activeScrollPane, delta)
+  }
+
+  private handleMouseInput(data: string): boolean {
+    const match = data.match(/^\u001b\[<(\d+);(\d+);(\d+)([Mm])$/)
+
+    if (!match || !this.lastLayout) {
+      return false
+    }
+
+    const buttonCode = Number(match[1])
+    const column = Number(match[2])
+    const row = Number(match[3])
+    const kind = match[4]
+
+    if (kind !== 'M' || (buttonCode & 64) === 0) {
+      return false
+    }
+
+    const wheelCode = buttonCode & 0b11
+
+    if (wheelCode !== 0 && wheelCode !== 1) {
+      return false
+    }
+
+    const pane = this.resolvePaneAtPosition(column, row)
+
+    if (!pane) {
+      return false
+    }
+
+    this.activeScrollPane = pane
+    this.scrollPane(pane, wheelCode === 0 ? -3 : 3)
+    this.tui.requestRender(true)
+
+    return true
+  }
+
+  private resolvePaneAtPosition(column: number, row: number): ScrollPane | null {
+    if (!this.lastLayout) {
+      return null
+    }
+
+    const bodyEndRow = this.lastLayout.bodyStartRow + this.lastLayout.bodyHeight - 1
+
+    if (row >= this.lastLayout.bodyStartRow && row <= bodyEndRow) {
+      return column <= this.lastLayout.chatWidth ? 'chat' : 'info'
+    }
+
+    const thinkingEndRow = this.lastLayout.thinkingStartRow + this.lastLayout.thinkingHeight - 1
+
+    if (row >= this.lastLayout.thinkingStartRow && row <= thinkingEndRow) {
+      return 'thinking'
+    }
+
+    return null
+  }
+
+  private scrollPane(pane: ScrollPane, delta: number): void {
+    if (pane === 'chat') {
       this.chatScrollOffset = Math.max(0, this.chatScrollOffset + delta)
       return
     }
 
-    if (this.activeScrollPane === 'thinking') {
+    if (pane === 'thinking') {
       this.thinkingScrollOffset = Math.max(0, this.thinkingScrollOffset + delta)
       return
     }
@@ -329,14 +410,13 @@ export class WorkbenchRootView implements Component, Focusable {
   }
 
   private resolveBodyViewportHeight(input: {
-    totalWidth: number
     thinkingLines: string[]
     composerLines: string[]
   }): number {
-    const assumedRows = 30
+    const terminalRows = Math.max(12, this.tui.terminal.rows)
     const reservedRows = 2 + input.thinkingLines.length + 1 + input.composerLines.length
 
-    return Math.max(8, assumedRows - reservedRows)
+    return Math.max(8, terminalRows - reservedRows)
   }
 }
 

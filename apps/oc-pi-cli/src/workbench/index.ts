@@ -43,15 +43,28 @@ interface WorkbenchActionResult {
 
 const DEFAULT_PROVIDER = 'github-copilot'
 const DEFAULT_MODEL_ID = 'gpt-5-mini'
+const ENTER_ALTERNATE_SCREEN = '\u001b[?1049h'
+const EXIT_ALTERNATE_SCREEN = '\u001b[?1049l'
+const ENABLE_MOUSE_REPORTING = '\u001b[?1000h\u001b[?1006h'
+const DISABLE_MOUSE_REPORTING = '\u001b[?1000l\u001b[?1006l'
 
 export async function startWorkbench(options: StartWorkbenchOptions): Promise<void> {
   const sessionStore = new FileRuntimeSessionStore(options.workspacePath)
   let session = await sessionStore.read()
   let state = session?.workbenchState ?? createDefaultWorkbenchState(options.workspacePath)
   let isBusy = false
+  let hasStopped = false
 
   const terminal = new ProcessTerminal()
   const tui = new TUI(terminal)
+  const stopWorkbench = (): void => {
+    if (hasStopped) {
+      return
+    }
+
+    hasStopped = true
+    stopWorkbenchTui(tui)
+  }
   const rootView = new WorkbenchRootView({
     tui,
     workspacePath: options.workspacePath,
@@ -118,13 +131,29 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
   tui.setFocus(rootView)
   tui.addInputListener((data) => {
     if (matchesKey(data, 'ctrl+c')) {
-      tui.stop()
+      stopWorkbench()
       process.exit(0)
     }
 
     return undefined
   })
-  tui.start()
+  process.once('SIGTERM', stopWorkbench)
+  process.once('exit', stopWorkbench)
+  process.stdout.write(ENTER_ALTERNATE_SCREEN)
+  process.stdout.write(ENABLE_MOUSE_REPORTING)
+
+  try {
+    tui.start()
+  } catch (error) {
+    stopWorkbench()
+    throw error
+  }
+}
+
+function stopWorkbenchTui(tui: TUI): void {
+  tui.stop()
+  process.stdout.write(DISABLE_MOUSE_REPORTING)
+  process.stdout.write(EXIT_ALTERNATE_SCREEN)
 }
 
 async function handleGoalPlanning(input: {
