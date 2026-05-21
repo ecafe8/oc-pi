@@ -9,9 +9,11 @@ import {
   type SlashCommand,
   type TUI,
   truncateToWidth,
+  visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
 import type { RuntimeSessionListItem } from "@/runtime/session-store.js";
+import { appendWorkbenchDebugLog, toHexSequence, toVisibleControlString } from "@/workbench/debug-log.js";
 import { presentWorkbenchState } from "@/workbench/presenters/present-workbench-state.js";
 import type { WorkbenchState } from "@/workbench/types.js";
 
@@ -31,6 +33,16 @@ const REVIEWER_LABEL_FG = "\u001b[38;5;221m";
 const ASSISTANT_LABEL_FG = "\u001b[38;5;159m";
 const SYSTEM_LABEL_FG = "\u001b[38;5;250m";
 const RESULT_LABEL_FG = "\u001b[38;5;120m";
+const INFO_CARD_BG = "\u001b[48;5;234m";
+const INFO_CARD_SECTION_BG = "\u001b[48;5;236m";
+const INFO_CARD_BORDER_FG = "\u001b[38;5;239m";
+const INFO_CARD_TITLE_FG = "\u001b[38;5;188m";
+const INFO_CARD_LABEL_FG = "\u001b[38;5;145m";
+const INFO_CARD_VALUE_FG = "\u001b[38;5;255m";
+const INFO_CARD_MUTED_FG = "\u001b[38;5;248m";
+const INFO_STATUS_PENDING_FG = "\u001b[38;5;221m";
+const INFO_STATUS_DONE_FG = "\u001b[38;5;120m";
+const INFO_STATUS_ACTIVE_FG = "\u001b[38;5;81m";
 const USER_ACCENT = "\u001b[38;5;153m";
 const PLANNER_ACCENT = "\u001b[38;5;81m";
 const REVIEWER_ACCENT = "\u001b[38;5;221m";
@@ -52,6 +64,14 @@ interface RenderLayoutMetrics {
   thinkingHeight: number;
   suggestionStartRow?: number;
   suggestionHeight?: number;
+}
+
+type InfoCardTone = "value" | "muted" | "status" | "active" | "done";
+
+interface InfoCardItem {
+  label: string;
+  value: string;
+  tone: InfoCardTone;
 }
 
 export interface WorkbenchRootViewOptions {
@@ -134,79 +154,108 @@ export class WorkbenchRootView implements Component, Focusable {
   }
 
   public handleInput(data: string): void {
-    if (this.handleMouseInput(data)) {
-      return;
-    }
+    try {
+      void appendWorkbenchDebugLog({
+        scope: 'view.handleInput',
+        message: 'received input',
+        data: {
+          visible: toVisibleControlString(data),
+          hex: toHexSequence(data),
+          lastEditorValue: this.lastEditorValue,
+          inlineSuggestionCount: this.inlineSessionSuggestions.length,
+          inputLocked: this.inputLocked,
+        },
+      });
 
-    if (matchesKey(data, Key.ctrl("1"))) {
-      this.activeScrollPane = "chat";
-      return;
-    }
-
-    if (matchesKey(data, Key.ctrl("2"))) {
-      this.activeScrollPane = "thinking";
-      return;
-    }
-
-    if (matchesKey(data, Key.ctrl("3"))) {
-      this.activeScrollPane = "info";
-      return;
-    }
-
-    if (matchesKey(data, Key.ctrl("4"))) {
-      this.activeScrollPane = "draft";
-      return;
-    }
-
-    if (matchesKey(data, Key.ctrl("u"))) {
-      this.scrollActivePane(-3);
-      return;
-    }
-
-    if (matchesKey(data, Key.ctrl("d"))) {
-      this.scrollActivePane(3);
-      return;
-    }
-
-    if (this.inlineSessionSuggestions.length > 0) {
-      if (matchesKey(data, "up")) {
-        this.selectedSessionSuggestionIndex = Math.max(0, this.selectedSessionSuggestionIndex - 1);
-        this.invalidate();
-        this.tui.requestRender(true);
+      if (this.handleMouseInput(data)) {
         return;
       }
 
-      if (matchesKey(data, "down")) {
-        this.selectedSessionSuggestionIndex = Math.min(
-          this.inlineSessionSuggestions.length - 1,
-          this.selectedSessionSuggestionIndex + 1,
-        );
-        this.invalidate();
-        this.tui.requestRender(true);
+      if (matchesKey(data, Key.ctrl("1"))) {
+        this.activeScrollPane = "chat";
         return;
       }
 
-      if (matchesKey(data, "tab")) {
-        this.applySelectedSessionSuggestion(false);
+      if (matchesKey(data, Key.ctrl("2"))) {
+        this.activeScrollPane = "thinking";
         return;
       }
 
-      if (matchesKey(data, "enter")) {
-        this.applySelectedSessionSuggestion(true);
+      if (matchesKey(data, Key.ctrl("3"))) {
+        this.activeScrollPane = "info";
         return;
       }
-    }
 
-    if (this.inputLocked) {
-      return;
-    }
+      if (matchesKey(data, Key.ctrl("4"))) {
+        this.activeScrollPane = "draft";
+        return;
+      }
 
-    const previousValue = this.lastEditorValue;
+      if (matchesKey(data, Key.ctrl("u"))) {
+        this.scrollActivePane(-3);
+        return;
+      }
 
-    this.editor.handleInput(data);
+      if (matchesKey(data, Key.ctrl("d"))) {
+        this.scrollActivePane(3);
+        return;
+      }
 
-    if (matchesKey(data, "tab") && previousValue !== this.lastEditorValue) {
-      void this.refreshInlineSessionSuggestions(this.lastEditorValue);
+      if (this.inlineSessionSuggestions.length > 0) {
+        if (matchesKey(data, "up")) {
+          this.selectedSessionSuggestionIndex = Math.max(0, this.selectedSessionSuggestionIndex - 1);
+          this.invalidate();
+          this.tui.requestRender(true);
+          return;
+        }
+
+        if (matchesKey(data, "down")) {
+          this.selectedSessionSuggestionIndex = Math.min(
+            this.inlineSessionSuggestions.length - 1,
+            this.selectedSessionSuggestionIndex + 1,
+          );
+          this.invalidate();
+          this.tui.requestRender(true);
+          return;
+        }
+
+        if (matchesKey(data, "tab")) {
+          this.applySelectedSessionSuggestion(false);
+          return;
+        }
+
+        if (matchesKey(data, "enter")) {
+          this.applySelectedSessionSuggestion(true);
+          return;
+        }
+      }
+
+      if (this.inputLocked) {
+        return;
+      }
+
+      const previousValue = this.lastEditorValue;
+
+      this.editor.handleInput(data);
+
+      if (matchesKey(data, "tab") && previousValue !== this.lastEditorValue) {
+        void this.refreshInlineSessionSuggestions(this.lastEditorValue);
+      }
+    } catch {
+      void appendWorkbenchDebugLog({
+        scope: 'view.handleInput',
+        message: 'input handling error',
+        data: {
+          visible: toVisibleControlString(data),
+          hex: toHexSequence(data),
+          lastEditorValue: this.lastEditorValue,
+          inlineSuggestionCount: this.inlineSessionSuggestions.length,
+        },
+      });
+
+      // Ignore malformed input/control sequences (for example IME switching) to keep the TUI alive.
+      this.invalidate();
+      this.tui.requestRender(true);
     }
   }
 
@@ -280,7 +329,7 @@ export class WorkbenchRootView implements Component, Focusable {
     }
 
     const infoWidth = Math.max(MIN_INFO_PANE_WIDTH, Math.floor(safeWidth * INFO_PANE_RATIO));
-    const dividerWidth = 3;
+    const dividerWidth = 2;
     const chatWidth = Math.max(20, safeWidth - infoWidth - dividerWidth);
     const thinkingLines = this.renderThinkingLines(safeWidth);
     const composerLabel = truncateToWidth(
@@ -322,17 +371,22 @@ export class WorkbenchRootView implements Component, Focusable {
     };
 
     for (let index = 0; index < rowCount; index += 1) {
-      const left = truncateToWidth(visibleChatLines[index] ?? "", chatWidth, "...", true);
-      const right = truncateToWidth(visibleInfoLines[index] ?? "", infoWidth, "...", true);
+      const left = visibleChatLines[index] ?? "";
+      const right = visibleInfoLines[index] ?? "";
 
-      bodyLines.push(`${left} | ${right}`);
+      bodyLines.push(
+        fitRenderedLine(
+          `${padRenderedLine(left, chatWidth)}${" ".repeat(dividerWidth)}${padRenderedLine(right, infoWidth)}`,
+          safeWidth,
+        ),
+      );
     }
 
     return [
       topBarLine,
-      "".padEnd(safeWidth, "-"),
+      "",
       ...bodyLines,
-      "".padEnd(safeWidth, "-"),
+      "",
       ...thinkingLines,
       ...liveDraftLines,
       composerLabel,
@@ -361,7 +415,7 @@ export class WorkbenchRootView implements Component, Focusable {
     ];
     const visibleThinkingLines = this.slicePaneLines("thinking", allLines, 6);
 
-    return [...visibleThinkingLines, "".padEnd(width, ".")];
+    return visibleThinkingLines;
   }
 
   private renderChatLines(width: number, view: ReturnType<typeof presentWorkbenchState>): string[] {
@@ -415,69 +469,70 @@ export class WorkbenchRootView implements Component, Focusable {
     ];
     const visibleLines = this.slicePaneLines("draft", allLines, LIVE_DRAFT_MAX_HEIGHT);
 
-    return [...visibleLines, "".padEnd(width, ".")];
+    return visibleLines;
   }
 
   private renderInfoLines(width: number, view: ReturnType<typeof presentWorkbenchState>): string[] {
-    const lines = [
-      this.decoratePaneTitle("Info", "info", width),
-      "",
-      "Project",
-      ...wrapTextWithAnsi(
-        `session: ${view.rightPane.projectInfo.sessionName ?? view.rightPane.projectInfo.sessionId ?? "none"}`,
-        width,
-      ),
-      ...wrapTextWithAnsi(`workspace: ${view.rightPane.projectInfo.workspacePath}`, width),
-      ...wrapTextWithAnsi(`goal: ${view.rightPane.projectInfo.goalSummary ?? "none"}`, width),
-      `stage: ${view.rightPane.projectInfo.currentStageId}`,
-      `stage-status: ${view.rightPane.projectInfo.currentStageStatus}`,
-      `role: ${view.rightPane.projectInfo.activeRoleId}`,
-      `target: ${view.rightPane.projectInfo.activeOutputTarget}`,
-      `boundary: ${view.rightPane.projectInfo.executionBoundary}`,
-      "",
-      "Plan",
+    const lines = [this.decoratePaneTitle("Info", "info", width), ""];
+    const projectItems: InfoCardItem[] = [
+      {
+        label: "session",
+        value: view.rightPane.projectInfo.sessionName ?? view.rightPane.projectInfo.sessionId ?? "none",
+        tone: "value",
+      },
+      { label: "workspace", value: view.rightPane.projectInfo.workspacePath, tone: "muted" },
+      { label: "goal", value: view.rightPane.projectInfo.goalSummary ?? "none", tone: "value" },
+      { label: "stage", value: view.rightPane.projectInfo.currentStageId, tone: "active" },
+      { label: "stage-status", value: view.rightPane.projectInfo.currentStageStatus, tone: "status" },
+      { label: "role", value: view.rightPane.projectInfo.activeRoleId, tone: "muted" },
+      { label: "target", value: view.rightPane.projectInfo.activeOutputTarget, tone: "muted" },
+      { label: "boundary", value: view.rightPane.projectInfo.executionBoundary, tone: "muted" },
     ];
 
-    if (view.rightPane.plan.steps.length === 0) {
-      lines.push("no plan yet");
-    } else {
-      for (const step of view.rightPane.plan.steps) {
-        lines.push(...wrapTextWithAnsi(`[${step.status}] ${step.label}`, width));
+    const planItems: InfoCardItem[] =
+      view.rightPane.plan.steps.length === 0
+        ? [{ label: "status", value: "no plan yet", tone: "muted" }]
+        : view.rightPane.plan.steps.flatMap((step, index) => {
+            const stepItems: InfoCardItem[] = [
+              {
+                label: `step ${index + 1}`,
+                value: step.label,
+                tone: step.status === "completed" ? "done" : step.status === "in_progress" ? "active" : "value",
+              },
+              { label: "state", value: step.status, tone: "status" },
+            ];
 
-        if (step.summary) {
-          lines.push(...wrapTextWithAnsi(`  ${step.summary}`, width));
-        }
-      }
-    }
+            if (step.summary) {
+              stepItems.push({ label: "note", value: step.summary, tone: "muted" });
+            }
 
-    lines.push("", "Execution");
-    lines.push(...wrapTextWithAnsi(`current: ${view.rightPane.execution.currentAction}`, width));
-    lines.push(...wrapTextWithAnsi(`latest: ${view.rightPane.execution.latestAction}`, width));
-    lines.push(`status: ${view.rightPane.execution.lastExecutionStatus}`);
-    lines.push(`review: ${view.rightPane.execution.latestReviewStatus ?? "not-started"}`);
+            return stepItems;
+          });
+
+    const executionItems: InfoCardItem[] = [
+      { label: "current", value: view.rightPane.execution.currentAction, tone: "value" },
+      { label: "latest", value: view.rightPane.execution.latestAction, tone: "muted" },
+      { label: "status", value: view.rightPane.execution.lastExecutionStatus, tone: "status" },
+      { label: "review", value: view.rightPane.execution.latestReviewStatus ?? "not-started", tone: "status" },
+      { label: "findings", value: String(view.rightPane.execution.reviewFindingCount), tone: "value" },
+      { label: "resolved", value: view.rightPane.execution.resolvedPath || "none", tone: "muted" },
+    ];
 
     if (view.rightPane.execution.latestReviewSummary) {
-      lines.push(...wrapTextWithAnsi(`review-summary: ${view.rightPane.execution.latestReviewSummary}`, width));
+      executionItems.push({ label: "review-summary", value: view.rightPane.execution.latestReviewSummary, tone: "muted" });
     }
 
-    lines.push(`findings: ${view.rightPane.execution.reviewFindingCount}`);
-    lines.push(...wrapTextWithAnsi(`resolved: ${view.rightPane.execution.resolvedPath || "none"}`, width));
-
-    if (view.rightPane.execution.touchedFiles.length > 0) {
-      lines.push("files:");
-
-      for (const file of view.rightPane.execution.touchedFiles) {
-        lines.push(...wrapTextWithAnsi(`- ${file}`, width));
-      }
+    for (const file of view.rightPane.execution.touchedFiles) {
+      executionItems.push({ label: "file", value: file, tone: "muted" });
     }
 
-    if (view.rightPane.execution.blockingIssues.length > 0) {
-      lines.push("blocking:");
-
-      for (const issue of view.rightPane.execution.blockingIssues) {
-        lines.push(...wrapTextWithAnsi(`- ${issue}`, width));
-      }
+    for (const issue of view.rightPane.execution.blockingIssues) {
+      executionItems.push({ label: "blocking", value: issue, tone: "status" });
     }
+
+    lines.push(...renderInfoCard(width, "Project", projectItems), "");
+    lines.push(...renderInfoCard(width, "Plan", planItems), "");
+    lines.push(...renderInfoCard(width, "Execution", executionItems));
 
     return lines;
   }
@@ -612,9 +667,10 @@ export class WorkbenchRootView implements Component, Focusable {
   }
 
   private decoratePaneTitle(label: string, pane: ScrollPane, width: number): string {
-    const suffix = this.activeScrollPane === pane ? " *" : "";
+    const suffix = this.activeScrollPane === pane ? " active" : "";
+    const title = truncateToWidth(`${label}${suffix}`, width, "...", true);
 
-    return truncateToWidth(`${label}${suffix}`, width, "...", true);
+    return fitRenderedLine(`${resolvePaneTitleForeground(pane)}${title}${ANSI_RESET}`, width);
   }
 
   private resolveBodyViewportHeight(input: {
@@ -651,7 +707,7 @@ export class WorkbenchRootView implements Component, Focusable {
 
     return normalizedLines.map((line) => {
       const content = truncateToWidth(line, width, "...", true).padEnd(width, " ");
-      return `${background}${INPUT_FG}${content}${ANSI_RESET}`;
+      return fitRenderedLine(`${background}${INPUT_FG}${content}${ANSI_RESET}`, width);
     });
   }
 
@@ -693,7 +749,10 @@ export class WorkbenchRootView implements Component, Focusable {
     }
 
     const lines = [
-      `${SYSTEM_LABEL_FG}${truncateToWidth("resume candidates  ↑↓ select  tab/enter apply", width, "...", true)}${ANSI_RESET}`,
+      fitRenderedLine(
+        `${SYSTEM_LABEL_FG}${truncateToWidth("resume candidates  ↑↓ select  tab/enter apply", width, "...", true)}${ANSI_RESET}`,
+        width,
+      ),
     ];
 
     for (const [index, session] of this.inlineSessionSuggestions.slice(0, 6).entries()) {
@@ -709,7 +768,7 @@ export class WorkbenchRootView implements Component, Focusable {
       const lineColor = index === this.selectedSessionSuggestionIndex ? PLANNER_ACCENT : SYSTEM_ACCENT;
 
       lines.push(
-        `${lineColor}${lineText}${ANSI_RESET}`,
+        fitRenderedLine(`${lineColor}${lineText}${ANSI_RESET}`, width),
       );
     }
 
@@ -720,8 +779,11 @@ export class WorkbenchRootView implements Component, Focusable {
     const query = parseSessionSuggestionQuery(value);
 
     if (query === null) {
+      this.sessionSuggestionRequestId += 1;
+
       if (this.inlineSessionSuggestions.length > 0) {
         this.inlineSessionSuggestions = [];
+        this.selectedSessionSuggestionIndex = 0;
         this.invalidate();
         this.tui.requestRender(true);
       }
@@ -761,6 +823,7 @@ export class WorkbenchRootView implements Component, Focusable {
 
     this.inlineSessionSuggestions = [];
     this.selectedSessionSuggestionIndex = 0;
+    this.sessionSuggestionRequestId += 1;
     this.invalidate();
     this.tui.requestRender(true);
 
@@ -980,7 +1043,7 @@ function applyBlockBackground(text: string, width: number, background: string, a
   const padded = truncateToWidth(text, contentWidth, "...", true).padEnd(contentWidth, " ");
   const accentBar = `${accent}▌${ANSI_RESET}`;
 
-  return `${background}${accentBar}${padded} ${ANSI_RESET}`;
+  return fitRenderedLine(`${background}${accentBar}${padded} ${ANSI_RESET}`, safeWidth);
 }
 
 function parseSessionSuggestionQuery(value: string): string | null {
@@ -1001,6 +1064,101 @@ function parseSessionSuggestionQuery(value: string): string | null {
 
 function normalizeSingleLineText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function fitRenderedLine(line: string, width: number): string {
+  if (visibleWidth(line) <= width) {
+    return line;
+  }
+
+  return truncateToWidth(line, width, "...", true);
+}
+
+function padRenderedLine(line: string, width: number): string {
+  const fitted = fitRenderedLine(line, width);
+  const paddingWidth = Math.max(0, width - visibleWidth(fitted));
+
+  return `${fitted}${" ".repeat(paddingWidth)}`;
+}
+
+function renderInfoCard(width: number, title: string, items: InfoCardItem[]): string[] {
+  const safeWidth = Math.max(12, width);
+  const contentWidth = Math.max(1, safeWidth - 2);
+  const lines: string[] = [];
+  const titleText = truncateToWidth(title, contentWidth, "...", true);
+
+  lines.push(
+    fitRenderedLine(
+      `${INFO_CARD_SECTION_BG}${INFO_CARD_BORDER_FG} ${INFO_CARD_TITLE_FG}${padRenderedLine(titleText, contentWidth)}${ANSI_RESET}`,
+      safeWidth,
+    ),
+  );
+
+  for (const item of items) {
+    const prefix = `${INFO_CARD_LABEL_FG}${item.label}${ANSI_RESET}${INFO_CARD_MUTED_FG}: ${ANSI_RESET}`;
+    const valueColor = resolveInfoCardTone(item.tone);
+    const wrappedLines = wrapTextWithAnsi(item.value, Math.max(1, contentWidth - Math.min(18, item.label.length + 2)));
+
+    if (wrappedLines.length === 0) {
+      lines.push(renderInfoCardBodyLine(prefix, `${valueColor}-${ANSI_RESET}`, safeWidth));
+      continue;
+    }
+
+    lines.push(renderInfoCardBodyLine(prefix, `${valueColor}${wrappedLines[0]}${ANSI_RESET}`, safeWidth));
+
+    for (const continuedLine of wrappedLines.slice(1)) {
+      lines.push(renderInfoCardBodyLine("  ", `${valueColor}${continuedLine}${ANSI_RESET}`, safeWidth));
+    }
+  }
+
+  return lines;
+}
+
+function renderInfoCardBodyLine(prefix: string, value: string, width: number): string {
+  const safeWidth = Math.max(12, width);
+  const contentWidth = Math.max(1, safeWidth - 2);
+  const line = padRenderedLine(`${prefix}${value}`, contentWidth);
+
+  return fitRenderedLine(
+    `${INFO_CARD_BG}${INFO_CARD_BORDER_FG} ${line}${ANSI_RESET}`,
+    safeWidth,
+  );
+}
+
+function resolveInfoCardTone(tone: InfoCardTone): string {
+  if (tone === "muted") {
+    return INFO_CARD_MUTED_FG;
+  }
+
+  if (tone === "active") {
+    return INFO_STATUS_ACTIVE_FG;
+  }
+
+  if (tone === "done") {
+    return INFO_STATUS_DONE_FG;
+  }
+
+  if (tone === "status") {
+    return INFO_STATUS_PENDING_FG;
+  }
+
+  return INFO_CARD_VALUE_FG;
+}
+
+function resolvePaneTitleForeground(pane: ScrollPane): string {
+  if (pane === "chat") {
+    return ASSISTANT_LABEL_FG;
+  }
+
+  if (pane === "thinking") {
+    return REVIEWER_LABEL_FG;
+  }
+
+  if (pane === "draft") {
+    return RESULT_LABEL_FG;
+  }
+
+  return SYSTEM_LABEL_FG;
 }
 
 function resolveSessionSuggestionDetail(session: RuntimeSessionListItem): string {

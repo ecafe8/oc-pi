@@ -11,6 +11,7 @@ import type { GoalToDocsRunRecord } from '@/planning/goal-to-docs/types.js'
 import { createDefaultWorkbenchState, DEFAULT_ROLE_CONFIGS } from '@/runtime/default-config.js'
 import { getCliRootPath } from '@/runtime/paths.js'
 import type { ReviewResult } from '@/shared/types/review.js'
+import { appendWorkbenchDebugLog } from '@/workbench/debug-log.js'
 import {
   FileRuntimeSessionStore,
   type RuntimeSessionListItem,
@@ -84,6 +85,7 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
   let activeChatAbortController: AbortController | undefined
   let escapePressCount = 0
   let lastEscapeAt = 0
+  let pendingPersistence = Promise.resolve()
 
   const terminal = new ProcessTerminal()
   const tui = new TUI(terminal)
@@ -177,11 +179,16 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
       tui.requestRender(true)
 
         if (hasActiveSession) {
-          await sessionStore.write({
+          const recordToPersist = {
             workbenchState: state,
             latestRun: session?.latestRun,
-          })
-          session = await sessionStore.read() ?? session
+          }
+
+          pendingPersistence = pendingPersistence
+            .catch(() => undefined)
+            .then(async () => {
+              await sessionStore.write(recordToPersist)
+            })
         }
       } finally {
         activeChatAbortController = undefined
@@ -232,6 +239,28 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
   })
   process.once('SIGTERM', stopWorkbench)
   process.once('exit', stopWorkbench)
+  process.on('uncaughtException', (error) => {
+    void appendWorkbenchDebugLog({
+      scope: 'process',
+      message: 'uncaughtException',
+      data: {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+      },
+    })
+  })
+  process.on('unhandledRejection', (reason) => {
+    void appendWorkbenchDebugLog({
+      scope: 'process',
+      message: 'unhandledRejection',
+      data: {
+        reason: reason instanceof Error
+          ? { name: reason.name, message: reason.message, stack: reason.stack }
+          : String(reason),
+      },
+    })
+  })
   process.stdout.write(ENTER_ALTERNATE_SCREEN)
   process.stdout.write(ENABLE_MOUSE_REPORTING)
 
