@@ -206,7 +206,7 @@ export class WorkbenchRootView implements Component, Focusable {
     });
 
     const topBarLine = truncateToWidth(
-      `session: ${view.topBar.sessionName ?? view.topBar.sessionId ?? 'none'} | model: ${view.topBar.modelId} | ctx: ${view.topBar.contextSummary} | version: ${view.topBar.appVersion} | mode: ${view.topBar.mode} | status: ${view.topBar.runtimeStatus}`,
+      `session: ${view.topBar.sessionName ?? view.topBar.sessionId ?? "none"} | model: ${view.topBar.modelId} | ctx: ${view.topBar.contextSummary} | version: ${view.topBar.appVersion} | mode: ${view.topBar.mode} | status: ${view.topBar.runtimeStatus}`,
       safeWidth,
       "...",
       true,
@@ -292,7 +292,10 @@ export class WorkbenchRootView implements Component, Focusable {
       this.decoratePaneTitle("Info", "info", width),
       "",
       "Project",
-      ...wrapTextWithAnsi(`session: ${view.rightPane.projectInfo.sessionName ?? view.rightPane.projectInfo.sessionId ?? 'none'}`, width),
+      ...wrapTextWithAnsi(
+        `session: ${view.rightPane.projectInfo.sessionName ?? view.rightPane.projectInfo.sessionId ?? "none"}`,
+        width,
+      ),
       ...wrapTextWithAnsi(`workspace: ${view.rightPane.projectInfo.workspacePath}`, width),
       ...wrapTextWithAnsi(`goal: ${view.rightPane.projectInfo.goalSummary ?? "none"}`, width),
       `stage: ${view.rightPane.projectInfo.currentStageId}`,
@@ -485,12 +488,7 @@ export class WorkbenchRootView implements Component, Focusable {
 
   private renderLockedComposerLines(width: number): string[] {
     const border = "".padEnd(Math.max(1, width), "─");
-    const message = truncateToWidth(
-      ` AI 处理中${this.resolveShimmerSuffix()}${this.renderCancelHint()}`,
-      width,
-      "...",
-      true,
-    );
+    const message = truncateToWidth(` AI 处理中${this.resolveShimmerSuffix()}}`, width, "...", true);
 
     return [border, message.padEnd(width, " "), border];
   }
