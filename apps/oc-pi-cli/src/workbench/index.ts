@@ -14,6 +14,9 @@ import {
   type RuntimeSessionListItem,
 } from '@/runtime/session-store.js'
 import {
+  appendAssistantReplyDelta,
+  appendAssistantThinkingDelta,
+  applyChatReply,
   applyGoalPlanToWorkbench,
   handleCancelRun,
   handleChatMessage,
@@ -21,6 +24,7 @@ import {
   handleGoalNew,
   handleReviewLatest,
   handleStatusShow,
+  markAssistantReplyPending,
 } from '@/workbench/controller/index.js'
 import { setWorkbenchGoal, setWorkbenchRuntimeStatus, toggleWorkbenchThinkingCollapsed } from '@/workbench/state.js'
 import { WorkbenchRootView } from '@/workbench/views/index.js'
@@ -39,6 +43,7 @@ export interface ParsedWorkbenchCommand {
 }
 
 interface GoalPlanDraft {
+  assistantReply: string
   summary: string
   steps: string[]
   shouldWrite: boolean
@@ -222,20 +227,47 @@ async function handleGoalPlanning(input: {
   goal: string
   cliRoot: string
   signal?: AbortSignal
+  onStateChange?: (state: import('@/workbench/types.js').WorkbenchState) => void
 }): Promise<WorkbenchActionResult> {
   const next = handleGoalNew({
     state: input.state,
     goal: input.goal,
   })
-  const plan = await createGoalPlan({
-    goal: input.goal,
-    cliRoot: input.cliRoot,
-    signal: input.signal,
-  })
+  let progressiveState = markAssistantReplyPending(next.state)
+  input.onStateChange?.(progressiveState)
+
+  let plan: GoalPlanDraft
+
+  try {
+    plan = await createGoalPlan({
+      goal: input.goal,
+      cliRoot: input.cliRoot,
+      signal: input.signal,
+      onThinkingDelta: (delta) => {
+        progressiveState = appendAssistantThinkingDelta(progressiveState, delta)
+        input.onStateChange?.(progressiveState)
+      },
+      onReplyDelta: (delta) => {
+        progressiveState = appendAssistantReplyDelta(progressiveState, delta)
+        input.onStateChange?.(progressiveState)
+      },
+    })
+  } catch (error) {
+    if (isAbortError(error, input.signal)) {
+      return {
+        state: appendSystemMessage(
+          setWorkbenchRuntimeStatus(progressiveState, 'idle'),
+          '已中断当前规划。',
+        ),
+      }
+    }
+
+    throw error
+  }
 
   return {
     state: applyGoalPlanToWorkbench({
-      state: next.state,
+      state: applyChatReply(progressiveState, plan.assistantReply),
       goal: input.goal,
       summary: plan.summary,
       steps: plan.steps,
@@ -251,6 +283,23 @@ async function handleChatInput(input: {
   signal: AbortSignal
   onStateChange: (state: import('@/workbench/types.js').WorkbenchState) => void
 }): Promise<WorkbenchActionResult> {
+  if (shouldConfirmDocsExecution(input.message, input.state)) {
+    const confirmIntentState = appendUserTimelineMessage(input.state, input.message)
+    input.onStateChange(confirmIntentState)
+
+    return handleWorkbenchCommand({
+      state: confirmIntentState,
+      input: {
+        commandName: '/docs-exec-confirm',
+      },
+      cliRoot: input.cliRoot,
+      onStateChange: input.onStateChange,
+      sessionContext: {
+        sessionStore: new FileRuntimeSessionStore(input.state.session.workspacePath),
+      },
+    })
+  }
+
   const planningGoal = buildPlanningGoalInput({
     currentGoal: input.state.session.currentGoal,
     inlineIntent: input.message,
@@ -266,8 +315,9 @@ async function handleChatInput(input: {
     state: input.state,
     message: input.message,
   })
-  const planningState = setWorkbenchGoal(chatState, planningGoal)
+  const planningState = markAssistantReplyPending(setWorkbenchGoal(chatState, planningGoal))
   input.onStateChange(planningState)
+  let progressiveState = planningState
 
   let plan: GoalPlanDraft
 
@@ -276,12 +326,20 @@ async function handleChatInput(input: {
       goal: planningGoal,
       cliRoot: input.cliRoot,
       signal: input.signal,
+      onThinkingDelta: (delta) => {
+        progressiveState = appendAssistantThinkingDelta(progressiveState, delta)
+        input.onStateChange(progressiveState)
+      },
+      onReplyDelta: (delta) => {
+        progressiveState = appendAssistantReplyDelta(progressiveState, delta)
+        input.onStateChange(progressiveState)
+      },
     })
   } catch (error) {
     if (isAbortError(error, input.signal)) {
       return {
         state: appendSystemMessage(
-          setWorkbenchRuntimeStatus(planningState, 'idle'),
+          setWorkbenchRuntimeStatus(progressiveState, 'idle'),
           '已中断当前规划。',
         ),
       }
@@ -292,7 +350,7 @@ async function handleChatInput(input: {
 
   return {
     state: applyGoalPlanToWorkbench({
-      state: planningState,
+      state: applyChatReply(progressiveState, plan.assistantReply),
       goal: planningGoal,
       summary: plan.summary,
       steps: plan.steps,
@@ -566,6 +624,8 @@ async function createGoalPlan(input: {
   goal: string
   cliRoot: string
   signal?: AbortSignal
+  onThinkingDelta?: (delta: string) => void
+  onReplyDelta?: (delta: string) => void
 }): Promise<GoalPlanDraft> {
   try {
     const credentialStore = new FileOAuthCredentialStore()
@@ -588,16 +648,34 @@ async function createGoalPlan(input: {
 
     await credentialStore.write(DEFAULT_PROVIDER, next.newCredentials)
 
-    const response = await agentBridge.prompt({
+    let responseText = ''
+    let visibleReply = ''
+
+    for await (const event of agentBridge.promptStream({
       cwd: input.cliRoot,
       provider: DEFAULT_PROVIDER,
       modelId: DEFAULT_MODEL_ID,
       prompt: buildGoalPlanPrompt(input.goal),
       apiKey: next.apiKey,
       signal: input.signal,
-    })
+    })) {
+      if (event.type === 'thinking-delta' && event.text) {
+        input.onThinkingDelta?.(event.text)
+      }
 
-    return parseGoalPlanResponse(response.text, input.goal)
+      if (event.type === 'text-delta' && event.text) {
+        responseText += event.text
+        const nextVisibleReply = extractAssistantPlanReply(responseText)
+        const replyDelta = nextVisibleReply.slice(visibleReply.length)
+
+        if (replyDelta) {
+          visibleReply = nextVisibleReply
+          input.onReplyDelta?.(replyDelta)
+        }
+      }
+    }
+
+    return parseGoalPlanResponse(responseText, input.goal, visibleReply.trim())
   } catch (error) {
     if (isAbortError(error, input.signal)) {
       throw error
@@ -619,26 +697,34 @@ function buildGoalPlanPrompt(goal: string): string {
   return [
     '你是 apps/oc-pi-cli 的工作台规划助手。',
     '请先判断这个目标是否需要实际写文件。',
-    '只返回 JSON，不要输出 Markdown 或解释。',
-    'JSON schema:',
+    '请严格输出两个区块，先输出给用户看的规划回复，再输出 JSON。',
+    '输出格式必须是：',
+    '<assistant_plan>',
+    '这里写给用户看的中文规划回复，包含：目标理解、3-5 条步骤、可继续修改或确认执行的提示。',
+    '</assistant_plan>',
+    '<plan_json>',
     '{"summary":"string","shouldWrite":true,"steps":["step 1","step 2","step 3"]}',
+    '</plan_json>',
     '规则:',
     '- summary 必须是一段简短中文执行方案',
     '- shouldWrite 表示执行阶段是否需要落地写入文件；若仅适合预览分析则为 false',
     '- steps 给出 3 到 5 条中文短步骤',
+    '- assistant_plan 必须是自然中文，不要解释标签规则',
     `goal: ${goal}`,
   ].join('\n')
 }
 
-function parseGoalPlanResponse(text: string, goal: string): GoalPlanDraft {
+function parseGoalPlanResponse(text: string, goal: string, assistantReply?: string): GoalPlanDraft {
   try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
+    const taggedJsonMatch = text.match(/<plan_json>\s*([\s\S]*?)\s*<\/plan_json>/)
+    const fallbackJsonMatch = text.match(/\{[\s\S]*\}/)
+    const jsonText = taggedJsonMatch?.[1] ?? fallbackJsonMatch?.[0]
 
-    if (!jsonMatch) {
+    if (!jsonText) {
       return createFallbackPlan(goal)
     }
 
-    const parsed = JSON.parse(jsonMatch[0]) as {
+    const parsed = JSON.parse(jsonText) as {
       summary?: string
       shouldWrite?: boolean
       steps?: string[]
@@ -649,6 +735,11 @@ function parseGoalPlanResponse(text: string, goal: string): GoalPlanDraft {
     }
 
     return {
+      assistantReply: assistantReply || formatGoalPlanAssistantReply({
+        summary: parsed.summary,
+        shouldWrite: parsed.shouldWrite ?? true,
+        steps: parsed.steps.slice(0, 5),
+      }),
       summary: parsed.summary,
       shouldWrite: parsed.shouldWrite ?? true,
       steps: parsed.steps.slice(0, 5),
@@ -660,19 +751,77 @@ function parseGoalPlanResponse(text: string, goal: string): GoalPlanDraft {
 
 function createFallbackPlan(goal: string): GoalPlanDraft {
   const shouldWrite = /生成|写入|更新|落地|文档|docs|文件/.test(goal)
+  const summary = shouldWrite
+    ? `我建议先确认目标边界，然后执行四阶段 goal-to-docs，并根据运行阶段决定写入 sandbox 还是 workspace docs。`
+    : '我建议先做预览分析，确认范围与阶段输出后再决定是否写入。'
+  const steps = [
+    '确认目标范围与输出边界',
+    '生成四阶段执行方案',
+    '根据对话继续补充或调整方案',
+    shouldWrite ? '确认后执行并输出结果文件摘要' : '确认后执行预览并等待下一步确认',
+  ]
 
   return {
-    summary: shouldWrite
-      ? `我建议先确认目标边界，然后执行四阶段 goal-to-docs，并根据运行阶段决定写入 sandbox 还是 workspace docs。`
-      : '我建议先做预览分析，确认范围与阶段输出后再决定是否写入。',
+    assistantReply: formatGoalPlanAssistantReply({
+      summary,
+      shouldWrite,
+      steps,
+    }),
+    summary,
     shouldWrite,
-    steps: [
-      '确认目标范围与输出边界',
-      '生成四阶段执行方案',
-      '等待用户确认是否执行',
-      shouldWrite ? '执行并输出结果文件摘要' : '预览结果并等待下一步确认',
-    ],
+    steps,
   }
+}
+
+function extractAssistantPlanReply(text: string): string {
+  const openTag = '<assistant_plan>'
+  const closeTag = '</assistant_plan>'
+  const startIndex = text.indexOf(openTag)
+
+  if (startIndex < 0) {
+    return ''
+  }
+
+  const contentStart = startIndex + openTag.length
+  const endIndex = text.indexOf(closeTag, contentStart)
+  const content = endIndex >= 0
+    ? text.slice(contentStart, endIndex)
+    : stripIncompleteXmlLikeTail(text.slice(contentStart))
+
+  return content.replace(/^\s+/, '')
+}
+
+function stripIncompleteXmlLikeTail(text: string): string {
+  const lastTagStart = text.lastIndexOf('<')
+
+  if (lastTagStart < 0) {
+    return text
+  }
+
+  const trailingSegment = text.slice(lastTagStart)
+
+  if (trailingSegment.includes('>')) {
+    return text
+  }
+
+  return text.slice(0, lastTagStart)
+}
+
+function formatGoalPlanAssistantReply(input: {
+  summary: string
+  steps: string[]
+  shouldWrite: boolean
+}): string {
+  return [
+    input.summary,
+    '',
+    '建议步骤：',
+    ...input.steps.map((step, index) => `${index + 1}. ${step}`),
+    '',
+    input.shouldWrite
+      ? '如果你认可这个方案，可以直接说“可以落文档”，或使用 /docs-exec-confirm。'
+      : '如果你认可这个方案，可以直接说“开始执行”，或使用 /docs-exec-confirm。',
+  ].join('\n')
 }
 
 function appendSystemMessage(
@@ -689,6 +838,26 @@ function appendSystemMessage(
           summary,
           createdAt: new Date().toISOString(),
           messageType: 'system-status',
+        },
+      ],
+    },
+  }
+}
+
+function appendUserTimelineMessage(
+  state: import('@/workbench/types.js').WorkbenchState,
+  message: string,
+): import('@/workbench/types.js').WorkbenchState {
+  return {
+    ...state,
+    timeline: {
+      items: [
+        ...state.timeline.items,
+        {
+          type: 'user-input',
+          summary: message,
+          createdAt: new Date().toISOString(),
+          messageType: 'user',
         },
       ],
     },
@@ -727,6 +896,29 @@ function buildPlanningGoalInput(input: {
   }
 
   return `${baseGoal}\n\n补充约束: ${inlineIntent}`
+}
+
+function shouldConfirmDocsExecution(
+  message: string,
+  state: import('@/workbench/types.js').WorkbenchState,
+): boolean {
+  const normalizedMessage = message.trim().toLowerCase()
+
+  if (!state.execution.pendingGoal || state.plan.steps.length === 0) {
+    return false
+  }
+
+  return [
+    /可以落文档/,
+    /开始落文档/,
+    /开始写入/,
+    /可以写入/,
+    /确认执行/,
+    /开始执行/,
+    /执行吧/,
+    /就按这个执行/,
+    /按这个写/, 
+  ].some((pattern) => pattern.test(normalizedMessage))
 }
 
 function filterSessionSuggestions(input: {

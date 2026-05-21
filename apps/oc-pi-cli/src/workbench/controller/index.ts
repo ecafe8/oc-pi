@@ -141,25 +141,7 @@ export function applyGoalPlanToWorkbench(
     requestedArtifactMode: input.shouldWrite ? 'write' : 'preview',
   })
 
-  return addTimelineItem(
-    addTimelineItem(
-      setWorkbenchRuntimeStatus(nextState, 'waiting-user'),
-      {
-        type: 'system-summary',
-        summary: input.summary,
-        createdAt: new Date().toISOString(),
-        messageType: 'assistant-plan',
-      },
-    ),
-    {
-      type: 'system-summary',
-      summary: input.shouldWrite
-        ? 'waiting-user: AI 建议执行写入，等待你确认。'
-        : 'waiting-user: AI 建议先执行预览，等待你确认。',
-      createdAt: new Date().toISOString(),
-      messageType: 'system-status',
-    },
-  )
+  return setWorkbenchRuntimeStatus(nextState, 'idle')
 }
 
 export function handleConfirmExecute(state: WorkbenchState): ConfirmExecuteControllerResult {

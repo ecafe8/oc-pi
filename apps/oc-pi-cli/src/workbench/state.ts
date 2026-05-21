@@ -194,7 +194,7 @@ export function setWorkbenchPlanDraft(
     },
     execution: {
       ...state.execution,
-      currentAction: 'waiting for confirmation',
+      currentAction: 'plan ready for refinement',
       latestAction: input.summary,
       requestedArtifactMode: input.requestedArtifactMode,
       pendingAssistantMessage: undefined,
