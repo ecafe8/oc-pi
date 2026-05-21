@@ -1,10 +1,10 @@
 ## MODIFIED Requirements
 
 ### Requirement: Workbench SHALL support explicit slash commands using kebab-case single-token syntax
-系统 MUST 为第一版工作台提供显式 `slash command 斜杠命令`，统一采用 `/docs-goal-new` 这种 `kebab-case 连字符命名` 单段语法，并在用户输入 `/` 与后续字符时提供动态命令补全与 `Tab` 完成能力。
+系统 MUST 为第一版工作台提供显式 `slash command 斜杠命令`，统一采用 `/docs-exec-confirm` 这种 `kebab-case 连字符命名` 单段语法，并在用户输入 `/` 与后续字符时提供动态命令补全与 `Tab` 完成能力。
 
 #### Scenario: Kebab-case slash command is accepted
-- **WHEN** 用户在输入区输入 `/docs-goal-new`、`/docs-status-show` 或 `/docs-review-latest`
+- **WHEN** 用户在输入区输入 `/docs-exec-confirm`、`/docs-exec-cancel`、`/session-resume` 等显式命令
 - **THEN** 系统 MUST 将其识别为显式结构化动作
 
 #### Scenario: Space-separated slash command is not the source-of-truth syntax
@@ -53,19 +53,15 @@
 
 ## ADDED Requirements
 
-### Requirement: Workbench SHALL accept natural-language follow-up text for selected slash commands
-系统 MUST 为选定的 slash command 提供“命令 + 自然语言描述”输入语义，使用户可以在单次提交中同时表达动作和补充约束。
+### Requirement: Workbench SHALL use ordinary chat as the primary docs planning surface
+系统 MUST 将 docs 规划与修正的主交互入口收敛为普通聊天，而不是要求用户依赖多个阶段性 `/docs-*` 命令完成规划。
 
-#### Scenario: Docs goal command accepts inline goal description
-- **WHEN** 用户输入 `/docs-goal-new <自然语言目标描述>`
-- **THEN** 系统 MUST 将该描述作为新的 docs goal 目标输入处理，而不是忽略其后文本
+#### Scenario: User plans docs through normal chat
+- **WHEN** 用户希望描述目标、补充约束或要求 AI 重新规划 docs 方案
+- **THEN** 系统 MUST 允许用户直接通过普通聊天完成这些规划动作
+- **THEN** 系统 MUST NOT 要求用户必须先记住并执行 `/docs-goal-new`、`/docs-plan-run` 或 `/docs-plan-retry` 才能进入规划过程
 
-#### Scenario: Docs planning commands accept inline planning intent
-- **WHEN** 用户输入 `/docs-plan-run <补充约束>` 或 `/docs-plan-retry <修正规则>`
-- **THEN** 系统 MUST 将该自然语言描述纳入本次 planning 规划上下文
-- **THEN** 系统 MUST NOT 要求用户必须再单独发送一条自然语言消息才能让这些约束生效
-
-#### Scenario: Deterministic commands remain deterministic
-- **WHEN** 用户输入 `/docs-exec-confirm`、`/docs-exec-cancel`、`/docs-status-show` 或 `/docs-review-latest`
-- **THEN** 系统 MUST 继续将其视为确定性动作命令
-- **THEN** 系统 MUST NOT 把其后任意自然语言文本默默解释为新的 AI 规划输入
+#### Scenario: Docs slash commands are limited to deterministic actions in the main flow
+- **WHEN** 工作台向用户暴露 docs 主流程命令
+- **THEN** 系统 MUST 将 `/docs-exec-confirm` 与 `/docs-exec-cancel` 作为主流程中高可见的确定性动作命令
+- **THEN** 系统 SHOULD 将其余 docs 规划类命令降级为兼容或高级用法，而不是推荐主路径

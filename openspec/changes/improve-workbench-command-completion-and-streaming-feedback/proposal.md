@@ -7,13 +7,13 @@
 - In Scope
 - 增强 `interactive-workbench 交互工作台` 的 slash command 斜杠命令输入体验，使 `/` 后的命令列表能够随输入动态过滤，并支持 `Tab` 键直接完成当前选中项。
 - 为需要参数的命令补齐参数自动补全，优先覆盖 `/session-resume` 与 `/session-fork` 的最近 session 会话列表补全，并显示 `session name 会话名`、`session id 会话标识`、更新时间与 goal 摘要。
-- 为适合的 docs 命令增加“命令 + 自然语言描述”输入语义，例如在 `/docs-goal-new`、`/docs-plan-run`、`/docs-plan-retry` 后追加约束文本，并将其纳入命令执行上下文。
+- 收敛 docs 交互模型：用户主要通过普通聊天与 AI 完成需求澄清、规划与修正，slash command 斜杠命令只保留少量确定性动作，优先聚焦 `/docs-exec-confirm` 与 `/docs-exec-cancel`。
 - 为 `goal-to-docs 目标到文档` 执行过程增加更细粒度的流式状态反馈，至少向用户持续暴露 `thinking`、`writing`、`reviewing` 等阶段级进度信息。
 - 在工作台中增加一个限高的 `live draft 实时草稿` 预览区域，用于显示当前 writer 正在生成的文档片段，同时避免长文本冲散主聊天历史。
 - 更新工作台真源文档与回归验证脚本，确保新增交互规则可被稳定复测。
 - Out of Scope
 - 不在本 change 中重做整体 TUI 布局，不扩展为自由多窗格系统。
-- 不把所有 slash command 都改成自然语言自由参数模式；仅覆盖有明确语义收益的命令。
+- 不再把 `/docs-goal-new`、`/docs-plan-run`、`/docs-plan-retry` 作为推荐主流程命令；若暂时保留，也只作为兼容或高级用法存在。
 - 不把完整大段最终文档直接灌入主聊天时间线，仍保持主聊天区以对话和状态摘要为主。
 
 ## Capabilities

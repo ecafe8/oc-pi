@@ -92,10 +92,7 @@ export function handleChatMessage(
   input: ChatMessageControllerInput,
 ): WorkbenchState {
   return addTimelineItem(
-    setWorkbenchGoal(
-      setWorkbenchRuntimeStatus(input.state, 'thinking'),
-      input.message,
-    ),
+    setWorkbenchRuntimeStatus(input.state, 'thinking'),
     {
       type: 'user-input',
       summary: input.message,

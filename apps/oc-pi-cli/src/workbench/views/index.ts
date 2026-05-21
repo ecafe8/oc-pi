@@ -630,19 +630,19 @@ function createWorkbenchCommands(
     {
       name: "docs-goal-new",
       argumentHint: "<goal-description>",
-      description: "规划新的文档目标，可直接在命令后追加自然语言目标",
+      description: "兼容命令：设置新的文档目标；推荐直接用自然语言聊天规划",
     },
     {
       name: "docs-plan-run",
       argumentHint: "[extra-intent]",
-      description: "为当前文档目标生成 AI 执行方案，可直接补充额外约束",
+      description: "兼容命令：为当前目标生成方案；推荐直接用自然语言聊天规划",
     },
     {
       name: "docs-plan-retry",
       argumentHint: "[retry-intent]",
-      description: "重新规划当前文档方案，可直接补充修正规则或额外要求",
+      description: "兼容命令：重新规划当前方案；推荐直接用自然语言要求重规划",
     },
-    { name: "docs-exec-confirm", description: "确认方案并执行，按运行阶段写入 sandbox 或文档" },
+    { name: "docs-exec-confirm", description: "确认当前聊天中已生成的方案并执行，按运行阶段写入 sandbox 或文档" },
     { name: "docs-exec-cancel", description: "取消待执行的文档方案，不回滚已写入文件" },
     { name: "docs-status-show", description: "查看当前文档工作流状态与执行边界" },
     { name: "docs-review-latest", description: "查看最近一次文档审查结论与摘要" },

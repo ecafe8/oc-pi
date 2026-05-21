@@ -4,11 +4,11 @@
 - [x] 1.2 为 `/session-resume` 与 `/session-fork` 增加基于当前 session store 的参数补全候选，至少展示 `sessionName` / `sessionId` 与最近更新时间或 goal 摘要中的一项。
 - [x] 1.3 调整补全后的光标与尾随空格行为，确保用户完成命令后可以继续输入参数或自然语言描述。
 
-## 2. 命令 + 自然语言描述语义
+## 2. Docs 主流程交互收敛
 
-- [x] 2.1 在 `apps/oc-pi-cli/src/workbench/index.ts` 的 slash command 执行路径中明确白名单命令，支持 `/docs-goal-new`、`/docs-plan-run`、`/docs-plan-retry`、`/session-new` 的 inline 自然语言参数。
-- [x] 2.2 保持 `/docs-exec-confirm`、`/docs-exec-cancel`、`/docs-status-show`、`/docs-review-latest` 为确定性命令，不将其后文本默默解释为新的 AI 规划输入。
-- [x] 2.3 更新帮助文案与命令描述，明确哪些命令支持自然语言尾随描述，哪些命令不支持。
+- [x] 2.1 收敛 `apps/oc-pi-cli/src/workbench/index.ts` 中的 docs 主流程交互，使普通聊天承担目标描述、补约束与重规划职责，不再要求用户依赖 `/docs-goal-new`、`/docs-plan-run`、`/docs-plan-retry` 作为推荐主路径。
+- [x] 2.2 保留 `/docs-exec-confirm` 与 `/docs-exec-cancel` 为 docs 主流程中的确定性动作命令，并避免其他 docs 命令继续以高可见主入口形式暴露给用户。
+- [x] 2.3 更新帮助文案与命令描述，明确 docs 规划默认通过普通聊天进行，而显式 slash command 主要用于确认执行、取消执行与 session 管理。
 
 ## 3. 流式执行反馈与草稿预览
 

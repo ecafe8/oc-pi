@@ -14,9 +14,6 @@ import {
   type RuntimeSessionListItem,
 } from '@/runtime/session-store.js'
 import {
-  appendAssistantReplyDelta,
-  appendAssistantThinkingDelta,
-  applyChatReply,
   applyGoalPlanToWorkbench,
   handleCancelRun,
   handleChatMessage,
@@ -24,9 +21,8 @@ import {
   handleGoalNew,
   handleReviewLatest,
   handleStatusShow,
-  markAssistantReplyPending,
 } from '@/workbench/controller/index.js'
-import { toggleWorkbenchThinkingCollapsed } from '@/workbench/state.js'
+import { setWorkbenchGoal, setWorkbenchRuntimeStatus, toggleWorkbenchThinkingCollapsed } from '@/workbench/state.js'
 import { WorkbenchRootView } from '@/workbench/views/index.js'
 
 export interface StartWorkbenchOptions {
@@ -115,6 +111,11 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
             cliRoot: getCliRootPath(),
             latestRun: session?.latestRun,
             sessionStore,
+            onStateChange: (nextState) => {
+              state = nextState
+              rootView.setState(state)
+              tui.requestRender(true)
+            },
           })
           state = result.state
           session = {
@@ -220,6 +221,7 @@ async function handleGoalPlanning(input: {
   state: import('@/workbench/types.js').WorkbenchState
   goal: string
   cliRoot: string
+  signal?: AbortSignal
 }): Promise<WorkbenchActionResult> {
   const next = handleGoalNew({
     state: input.state,
@@ -228,6 +230,7 @@ async function handleGoalPlanning(input: {
   const plan = await createGoalPlan({
     goal: input.goal,
     cliRoot: input.cliRoot,
+    signal: input.signal,
   })
 
   return {
@@ -248,43 +251,53 @@ async function handleChatInput(input: {
   signal: AbortSignal
   onStateChange: (state: import('@/workbench/types.js').WorkbenchState) => void
 }): Promise<WorkbenchActionResult> {
-  const thinkingState = markAssistantReplyPending(handleChatMessage({
-    state: input.state,
-    message: input.message,
-  }))
-  input.onStateChange(thinkingState)
-
-  const reply = await createChatReply({
-    message: input.message,
-    cliRoot: input.cliRoot,
-    currentGoal: thinkingState.session.currentGoal,
-    signal: input.signal,
-    onDelta: (delta, currentState) => {
-      const nextState = appendAssistantReplyDelta(currentState, delta)
-      input.onStateChange(nextState)
-      return nextState
-    },
-    onThinkingDelta: (delta, currentState) => {
-      const nextState = appendAssistantThinkingDelta(currentState, delta)
-      input.onStateChange(nextState)
-      return nextState
-    },
-    initialState: thinkingState,
+  const planningGoal = buildPlanningGoalInput({
+    currentGoal: input.state.session.currentGoal,
+    inlineIntent: input.message,
   })
 
-  if (reply.interrupted) {
-    const interruptedReply = reply.text.trim() || '已中断当前 AI 回复。'
-
+  if (!planningGoal) {
     return {
-      state: appendSystemMessage(
-        applyChatReply(reply.state, interruptedReply),
-        '已中断当前 AI 回复。',
-      ),
+      state: appendSystemMessage(input.state, '未收到可用于规划的目标内容。'),
     }
   }
 
+  const chatState = handleChatMessage({
+    state: input.state,
+    message: input.message,
+  })
+  const planningState = setWorkbenchGoal(chatState, planningGoal)
+  input.onStateChange(planningState)
+
+  let plan: GoalPlanDraft
+
+  try {
+    plan = await createGoalPlan({
+      goal: planningGoal,
+      cliRoot: input.cliRoot,
+      signal: input.signal,
+    })
+  } catch (error) {
+    if (isAbortError(error, input.signal)) {
+      return {
+        state: appendSystemMessage(
+          setWorkbenchRuntimeStatus(planningState, 'idle'),
+          '已中断当前规划。',
+        ),
+      }
+    }
+
+    throw error
+  }
+
   return {
-    state: applyChatReply(reply.state, reply.text),
+    state: applyGoalPlanToWorkbench({
+      state: planningState,
+      goal: planningGoal,
+      summary: plan.summary,
+      steps: plan.steps,
+      shouldWrite: plan.shouldWrite,
+    }),
   }
 }
 
@@ -294,6 +307,7 @@ export async function executeWorkbenchSlashCommand(input: {
   cliRoot: string
   latestRun?: import('@/planning/goal-to-docs/types.js').GoalToDocsRunRecord
   sessionStore: FileRuntimeSessionStore
+  onStateChange?: (state: import('@/workbench/types.js').WorkbenchState) => void
 }): Promise<WorkbenchActionResult> {
   const parsedCommand = typeof input.command === 'string'
     ? parseWorkbenchCommand(input.command)
@@ -304,6 +318,7 @@ export async function executeWorkbenchSlashCommand(input: {
     input: parsedCommand,
     cliRoot: input.cliRoot,
     latestRun: input.latestRun,
+    onStateChange: input.onStateChange,
     sessionContext: {
       sessionStore: input.sessionStore,
     },
@@ -315,6 +330,7 @@ async function handleWorkbenchCommand(input: {
   input: ParsedWorkbenchCommand
   cliRoot: string
   latestRun?: import('@/planning/goal-to-docs/types.js').GoalToDocsRunRecord
+  onStateChange?: (state: import('@/workbench/types.js').WorkbenchState) => void
   sessionContext: SessionCommandContext
 }): Promise<WorkbenchActionResult> {
   switch (input.input.commandName) {
@@ -389,6 +405,7 @@ async function handleWorkbenchCommand(input: {
         skipInitialGoalTimeline: true,
         onWorkbenchStateChange: (nextState) => {
           progressiveState = nextState
+          input.onStateChange?.(nextState)
         },
       })
 
@@ -452,7 +469,7 @@ async function handleWorkbenchCommand(input: {
       return {
         state: appendSystemMessage(
           input.state,
-          'Commands: /session-new [name] 创建并切换新会话，可直接输入会话名； /session-list 列出当前项目会话； /session-resume <session-id-or-path> 恢复指定会话，支持补全最近会话； /session-fork [session-id-or-path] 从会话创建分支，支持补全最近会话； /docs-goal-new [goal] 规划新的文档目标，支持直接输入自然语言目标； /docs-plan-run [intent] 生成文档执行方案，支持补充本次规划约束； /docs-plan-retry [intent] 重新规划当前方案，支持补充修正规则； /docs-exec-confirm 确认方案并执行写入； /docs-exec-cancel 取消待执行方案； /docs-status-show 查看状态与执行边界； /docs-review-latest 查看最近审查结论； /workbench-help-show 查看命令帮助； /workbench-thinking-toggle 折叠或展开 Thinking 区； /workbench-pane-chat-focus 聚焦聊天区； /workbench-pane-thinking-focus 聚焦 Thinking 区； /workbench-pane-info-focus 聚焦信息区',
+          'Commands: 自然语言默认用于 docs 规划、补约束与修正方案； /docs-exec-confirm 确认当前方案并执行； /docs-exec-cancel 取消待执行方案； /session-new [name] 创建并切换新会话； /session-list 列出当前项目会话； /session-resume <session-id-or-path> 恢复指定会话，支持补全最近会话； /session-fork [session-id-or-path] 从会话创建分支，支持补全最近会话； /docs-status-show 查看状态与执行边界； /docs-review-latest 查看最近审查结论； /workbench-help-show 查看命令帮助； /workbench-thinking-toggle 折叠或展开 Thinking 区； /workbench-pane-chat-focus 聚焦聊天区； /workbench-pane-thinking-focus 聚焦 Thinking 区； /workbench-pane-info-focus 聚焦信息区。兼容命令 /docs-goal-new、/docs-plan-run、/docs-plan-retry 仍可用，但不再是推荐主流程。',
         ),
         latestRun: input.latestRun,
       }
@@ -474,13 +491,13 @@ async function handleWorkbenchCommand(input: {
         })
 
         return {
-          state: appendSystemMessage(next.state, '已接收新的 docs goal。可继续用 /docs-plan-run 生成执行方案。'),
+          state: appendSystemMessage(next.state, '已接收新的 docs goal。当前推荐直接继续用自然语言补充或修正需求；该兼容命令不再是推荐主流程。'),
           latestRun: input.latestRun,
         }
       }
 
       return {
-        state: appendSystemMessage(input.state, '已准备新的 docs goal。接下来请用自然语言描述目标，再用 /docs-plan-run 生成执行方案。'),
+        state: appendSystemMessage(input.state, '已准备新的 docs goal。当前推荐直接发送自然语言目标，让工作台生成方案。'),
         latestRun: input.latestRun,
       }
 
@@ -501,6 +518,7 @@ async function handleWorkbenchCommand(input: {
         state: input.state,
         goal: planningGoal,
         cliRoot: input.cliRoot,
+        signal: undefined,
       })
     }
 
@@ -517,12 +535,13 @@ async function handleWorkbenchCommand(input: {
         }
       }
 
-      const retriedState = appendSystemMessage(input.state, 'Retrying AI plan generation for current goal.')
+      const retriedState = appendSystemMessage(input.state, '正在重试当前 docs 方案规划。当前推荐主流程也支持直接用自然语言要求重新规划。')
 
       return handleGoalPlanning({
         state: retriedState,
         goal: planningGoal,
         cliRoot: input.cliRoot,
+        signal: undefined,
       })
     }
 
@@ -546,6 +565,7 @@ export function parseWorkbenchCommand(input: string): ParsedWorkbenchCommand {
 async function createGoalPlan(input: {
   goal: string
   cliRoot: string
+  signal?: AbortSignal
 }): Promise<GoalPlanDraft> {
   try {
     const credentialStore = new FileOAuthCredentialStore()
@@ -574,100 +594,25 @@ async function createGoalPlan(input: {
       modelId: DEFAULT_MODEL_ID,
       prompt: buildGoalPlanPrompt(input.goal),
       apiKey: next.apiKey,
+      signal: input.signal,
     })
 
     return parseGoalPlanResponse(response.text, input.goal)
-  } catch {
+  } catch (error) {
+    if (isAbortError(error, input.signal)) {
+      throw error
+    }
+
     return createFallbackPlan(input.goal)
   }
 }
 
-async function createChatReply(input: {
-  message: string
-  cliRoot: string
-  currentGoal?: string
-  initialState: import('@/workbench/types.js').WorkbenchState
-  signal: AbortSignal
-  onDelta: (delta: string, state: import('@/workbench/types.js').WorkbenchState) => import('@/workbench/types.js').WorkbenchState
-  onThinkingDelta: (delta: string, state: import('@/workbench/types.js').WorkbenchState) => import('@/workbench/types.js').WorkbenchState
-}): Promise<{ text: string; state: import('@/workbench/types.js').WorkbenchState; interrupted: boolean }> {
-  try {
-    const credentialStore = new FileOAuthCredentialStore()
-    const loginBridge = new PiOAuthLoginBridge()
-    const agentBridge = new PiModelAgentBridge()
-    const credentials = await credentialStore.read(DEFAULT_PROVIDER)
-
-    if (!credentials) {
-      return {
-        text: createFallbackChatReply(input.message),
-        state: input.initialState,
-        interrupted: false,
-      }
-    }
-
-    const next = await loginBridge.getApiKey({
-      provider: DEFAULT_PROVIDER,
-      credentials: { [DEFAULT_PROVIDER]: credentials },
-    })
-
-    if (!next) {
-      return {
-        text: createFallbackChatReply(input.message),
-        state: input.initialState,
-        interrupted: false,
-      }
-    }
-
-    await credentialStore.write(DEFAULT_PROVIDER, next.newCredentials)
-
-    let streamedText = ''
-    let currentState = input.initialState
-
-    for await (const event of agentBridge.promptStream({
-      cwd: input.cliRoot,
-      provider: DEFAULT_PROVIDER,
-      modelId: DEFAULT_MODEL_ID,
-      prompt: buildWorkbenchChatPrompt(input),
-      apiKey: next.apiKey,
-      signal: input.signal,
-    })) {
-
-      if (event.type === 'text-delta' && event.text) {
-        streamedText += event.text
-        currentState = input.onDelta(event.text, currentState)
-      }
-
-      if (event.type === 'thinking-delta' && event.text) {
-        currentState = input.onThinkingDelta(event.text, currentState)
-      }
-    }
-
-    return {
-      text: streamedText.trim() || createFallbackChatReply(input.message),
-      state: currentState,
-      interrupted: input.signal.aborted,
-    }
-  } catch {
-    return {
-      text: createFallbackChatReply(input.message),
-      state: input.initialState,
-      interrupted: input.signal.aborted,
-    }
+function isAbortError(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) {
+    return true
   }
-}
 
-function buildWorkbenchChatPrompt(input: {
-  message: string
-  currentGoal?: string
-}): string {
-  return [
-    '你是 apps/oc-pi-cli 的 interactive workbench 聊天助手。',
-    '当前阶段先只做聊天，不要直接执行任务，不要把自然语言输入解释成命令。',
-    '如果用户想真正触发任务，请提醒使用 slash command，例如 /docs-plan-run、/docs-status-show、/docs-review-latest。',
-    '请用简洁中文回复。',
-    input.currentGoal ? `current goal: ${input.currentGoal}` : 'current goal: none',
-    `user message: ${input.message}`,
-  ].join('\n')
+  return error instanceof Error && error.name === 'AbortError'
 }
 
 function buildGoalPlanPrompt(goal: string): string {
@@ -728,10 +673,6 @@ function createFallbackPlan(goal: string): GoalPlanDraft {
       shouldWrite ? '执行并输出结果文件摘要' : '预览结果并等待下一步确认',
     ],
   }
-}
-
-function createFallbackChatReply(message: string): string {
-  return `我已收到你的消息：${message}。当前自然语言输入先作为聊天处理；如果你想生成执行方案，请输入 /docs-plan-run。`
 }
 
 function appendSystemMessage(

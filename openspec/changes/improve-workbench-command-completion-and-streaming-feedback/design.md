@@ -3,7 +3,7 @@
 当前 `interactive-workbench 交互工作台` 已经具备 chat-first 对话优先布局、slash command 斜杠命令、Pi-backed session 会话真源与 `goal-to-docs 目标到文档` 执行闭环，但实际交互中仍有三个明显缺口：
 
 1. 命令输入虽然已接入 `Editor 编辑器` 与 `CombinedAutocompleteProvider 组合补全提供器`，但缺少针对工作台语义打磨后的自动完成与参数候选体验，尤其是 `/session-resume` 这类需要引用现有 session 的命令。
-2. 命令目前主要是“命令名 + 少量技术参数”，还没有把“命令 + 自然语言补充意图”稳定纳入工作流，导致用户需要在聊天和命令之间来回切换。
+2. docs 主流程目前仍暴露了较多 `/docs-*` 命令，但这些命令中的大部分步骤本质上属于聊天规划过程，而不是用户需要记忆的确定性动作。
 3. `goal-to-docs` 执行过程虽然会输出结果，但用户还看不到足够连续的阶段状态与 writer 草稿增量，因此在长时间生成时容易失去方向感。
 
 约束也很明确：
@@ -16,13 +16,13 @@
 **Goals:**
 - 让 slash command 斜杠命令在输入 `/` 后即可动态过滤，并支持 `Tab` 键直接完成。
 - 让 `/session-resume`、`/session-fork` 等带参数命令可以自动补全最近 session 列表。
-- 为适合的 docs 命令建立“命令 + 自然语言描述”语义，并将描述纳入执行上下文。
+- 收敛 docs 主流程，使用户主要通过普通聊天完成规划与修正，只把确认执行与取消执行保留为高可见确定性命令。
 - 为 `goal-to-docs` 增加阶段级流式进度反馈，并新增限高的 `live draft 实时草稿` 预览区域。
 - 保持工作台顶部与右侧信息区在 session 切换和执行阶段推进时持续可读。
 
 **Non-Goals:**
 - 不在本次 change 中改成多窗格自由布局。
-- 不把所有 slash command 都支持为任意自然语言参数。
+- 不把大部分 docs 规划步骤继续暴露为推荐 slash command 主路径。
 - 不把完整最终文档全文持续写入聊天时间线。
 - 不改变 Pi session 真源、write policy 写入策略与 sandbox / production 边界规则。
 
@@ -42,19 +42,19 @@
 备选方案 B：只保留静态命令名补全，不做参数候选。
 - 不采纳原因：`/session-resume` 的主要痛点就在“用户记不住 session id”。
 
-### Decision 2: 只为有限的 docs 命令开放“命令 + 自然语言描述”语义
+### Decision 2: docs 规划默认走普通聊天，slash command 只保留确定性动作主路径
 
-采纳方案：仅为 `docs-goal-new`、`docs-plan-run`、`docs-plan-retry`、`session-new` 这类天然适合附加描述的命令开放 inline 自然语言参数；`docs-exec-confirm`、`docs-exec-cancel`、`docs-status-show`、`docs-review-latest` 继续保持确定性动作语义。
+采纳方案：把 docs 规划与修正默认收敛到普通聊天，slash command 主路径只强调 `/docs-exec-confirm` 与 `/docs-exec-cancel`。`/docs-goal-new`、`/docs-plan-run`、`/docs-plan-retry` 如继续保留，也只作为兼容/高级用法，不再是推荐主流程。
 
 理由：
-- 这样可以把“命令负责动作，参数负责补充意图”的边界保持清晰。
-- 可以减少用户误以为所有命令后面的任意文本都会被 AI 理解的问题。
+- 规划本身就是 AI chat 人工智能对话最擅长的交互，不应要求用户记住过多阶段性命令。
+- 用户真正需要命令保证确定性的，是“确认执行”和“取消执行”这类状态切换动作。
 
-备选方案 A：让所有 slash command 都接受自由文本。
-- 不采纳原因：命令语义会变得混乱，回归验证也更难稳定。
+备选方案 A：继续把 `docs-goal-new`、`docs-plan-run`、`docs-plan-retry` 作为推荐主路径，并为其增加更多自然语言参数语义。
+- 不采纳原因：虽然能工作，但交互仍然显得繁琐，且会弱化 chat-first 的产品定位。
 
-备选方案 B：完全不支持 inline 描述，只允许命令前后分离输入。
-- 不采纳原因：会保留当前“流程能走但不够顺”的主要痛点。
+备选方案 B：彻底移除所有 `/docs-*`，连确认执行也回到自然语言。
+- 不采纳原因：确认/取消这类确定性动作仍适合用显式命令，以降低误触发风险。
 
 ### Decision 3: 把执行过程反馈拆成“阶段状态流”与“限高草稿流”两层
 
@@ -86,7 +86,7 @@
 ## Risks / Trade-offs
 
 - [参数补全与 session 状态不同步] → 每次补全请求实时读取当前 session 列表，并优先显示 current / recent 项。
-- [命令后自然语言描述语义扩散] → 只对白名单命令开放 inline 描述，并在帮助文案中明确哪些命令支持描述文本。
+- [docs 命令入口过多导致用户困惑] → 收敛推荐主流程到“普通聊天 + `/docs-exec-confirm` / `/docs-exec-cancel`”，把其余 docs 命令降级为兼容入口。
 - [流式草稿区域重新挤压布局] → 使用固定高度 + 独立滚动，不改变现有整体布局比例。
 - [阶段状态过多导致时间线噪音] → 只记录关键相位切换，不记录每个 token 级事件。
 - [writer 草稿与最终落盘内容不完全一致] → 在文案中明确 `live draft` 是生成中预览，不承诺与最终产物逐字一致。
@@ -101,7 +101,7 @@
 ## Migration Plan
 
 1. 先增强工作台命令定义，为支持参数补全的命令补齐动态候选提供器。
-2. 再收口 slash command 解析逻辑，明确哪些命令允许 inline 自然语言描述，并补帮助文案。
+2. 再收口 docs 主流程交互，明确普通聊天负责规划，`/docs-exec-confirm` 与 `/docs-exec-cancel` 负责确定性动作，并补帮助文案。
 3. 为 `goal-to-docs` 执行链路补阶段级状态事件与 writer/reviewer 相位信号。
 4. 在 workbench view 中新增限高 `live draft 实时草稿` 区，并保持其独立滚动。
 5. 更新回归脚本与文档，验证 session 参数补全、命令语义和执行反馈展示。
@@ -114,4 +114,4 @@
 ## Open Questions
 
 - `live draft 实时草稿` 更适合放在右侧信息区底部，还是放在 Thinking 区下方作为独立区域？
-- `/docs-plan-run <自然语言描述>` 的描述文本应追加到当前 goal，还是作为单次 plan override 规划覆盖输入？
+- 兼容保留的 `/docs-goal-new`、`/docs-plan-run`、`/docs-plan-retry` 是否仍需要长期保留，还是在后续 change 中完全移除？
