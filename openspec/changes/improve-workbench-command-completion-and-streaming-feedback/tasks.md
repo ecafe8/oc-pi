@@ -21,4 +21,4 @@
 - [x] 4.1 更新 `apps/web-docs/content/docs/planning/interactive-workbench.md`，同步 slash command 补全、参数补全、inline 描述语义与流式草稿预览规则。
 - [x] 4.2 扩展 `apps/oc-pi-cli/tests/regression/check-workbench-session-smoke.ts` 或等价测试脚本，覆盖 session 参数补全相关的运行时数据准备与回归验证边界。
 - [x] 4.3 执行 `bun run types:check`（`apps/oc-pi-cli`）与 `bun run workbench:smoke:sessions`，确认交互优化后的类型检查和 session 回归验证通过。
-- [ ] 4.4 执行一次 `bun run src/index.ts workbench` 的手动 smoke test，验证 `/` 命令补全、`Tab` 完成、`/session-resume` 参数候选、阶段级流式状态与限高草稿区的实际表现。
+- [x] 4.4 执行一次 `bun run src/index.ts workbench` 的手动 smoke test，验证 `/` 命令补全、`Tab` 完成、`/session-resume` 参数候选、阶段级流式状态与限高草稿区的实际表现。

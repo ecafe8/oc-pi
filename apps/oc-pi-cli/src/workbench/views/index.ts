@@ -291,7 +291,7 @@ export class WorkbenchRootView implements Component, Focusable {
     }
 
     for (const message of view.chatPane.messages) {
-      const label = toMessagePrefix(message.type);
+      const label = toMessagePrefix(message.type, message.actorLabel);
       const content = `${label}: ${message.summary}`;
 
       lines.push(...wrapTextWithAnsi(content, width));
@@ -692,13 +692,13 @@ const EDITOR_THEME = {
   },
 };
 
-function toMessagePrefix(type: string): string {
+function toMessagePrefix(type: string, actorLabel?: string): string {
   if (type.startsWith("user")) {
     return "U";
   }
 
   if (type.startsWith("assistant")) {
-    return "A";
+    return actorLabel ? `A/${actorLabel}` : "A";
   }
 
   if (type.startsWith("result")) {

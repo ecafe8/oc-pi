@@ -4,11 +4,13 @@ import {
   FileOAuthCredentialStore,
   PiModelAgentBridge,
   PiOAuthLoginBridge,
+  resolveProviderModelForRole,
 } from '@/provider-adapters/index.js'
 import { type ArtifactMode, runGoalToDocsMvp } from '@/planning/goal-to-docs/run-mvp.js'
 import type { GoalToDocsRunRecord } from '@/planning/goal-to-docs/types.js'
-import { createDefaultWorkbenchState } from '@/runtime/default-config.js'
+import { createDefaultWorkbenchState, DEFAULT_ROLE_CONFIGS } from '@/runtime/default-config.js'
 import { getCliRootPath } from '@/runtime/paths.js'
+import type { ReviewResult } from '@/shared/types/review.js'
 import {
   FileRuntimeSessionStore,
   type RuntimeSessionListItem,
@@ -16,6 +18,7 @@ import {
 import {
   appendAssistantReplyDelta,
   appendAssistantThinkingDelta,
+  applyReviewToWorkbench,
   applyChatReply,
   applyGoalPlanToWorkbench,
   handleCancelRun,
@@ -26,7 +29,7 @@ import {
   handleStatusShow,
   markAssistantReplyPending,
 } from '@/workbench/controller/index.js'
-import { setWorkbenchGoal, setWorkbenchRuntimeStatus, toggleWorkbenchThinkingCollapsed } from '@/workbench/state.js'
+import { setWorkbenchExecutionProgress, setWorkbenchGoal, setWorkbenchRuntimeStatus, toggleWorkbenchThinkingCollapsed } from '@/workbench/state.js'
 import { WorkbenchRootView } from '@/workbench/views/index.js'
 
 export interface StartWorkbenchOptions {
@@ -49,6 +52,11 @@ interface GoalPlanDraft {
   shouldWrite: boolean
 }
 
+interface PlanningLoopResult {
+  plan: GoalPlanDraft
+  latestReview?: ReviewResult
+}
+
 interface WorkbenchActionResult {
   state: import('@/workbench/types.js').WorkbenchState
   latestRun?: GoalToDocsRunRecord
@@ -56,6 +64,9 @@ interface WorkbenchActionResult {
 
 const DEFAULT_PROVIDER = 'github-copilot'
 const DEFAULT_MODEL_ID = 'gpt-5-mini'
+const PLANNER_ACTOR_LABEL = 'Planner'
+const REVIEWER_ACTOR_LABEL = 'Reviewer'
+const MAX_PLANNING_REVIEW_ROUNDS = 3
 const ENTER_ALTERNATE_SCREEN = '\u001b[?1049h'
 const EXIT_ALTERNATE_SCREEN = '\u001b[?1049l'
 const ENABLE_MOUSE_REPORTING = '\u001b[?1000h\u001b[?1006h'
@@ -229,27 +240,26 @@ async function handleGoalPlanning(input: {
   signal?: AbortSignal
   onStateChange?: (state: import('@/workbench/types.js').WorkbenchState) => void
 }): Promise<WorkbenchActionResult> {
+  const signal = input.signal ?? new AbortController().signal
+
   const next = handleGoalNew({
     state: input.state,
     goal: input.goal,
   })
-  let progressiveState = markAssistantReplyPending(next.state)
+  let progressiveState = next.state
   input.onStateChange?.(progressiveState)
 
-  let plan: GoalPlanDraft
+  let result: PlanningLoopResult
 
   try {
-    plan = await createGoalPlan({
+    result = await runPlanningReviewLoop({
+      state: progressiveState,
       goal: input.goal,
       cliRoot: input.cliRoot,
-      signal: input.signal,
-      onThinkingDelta: (delta) => {
-        progressiveState = appendAssistantThinkingDelta(progressiveState, delta)
-        input.onStateChange?.(progressiveState)
-      },
-      onReplyDelta: (delta) => {
-        progressiveState = appendAssistantReplyDelta(progressiveState, delta)
-        input.onStateChange?.(progressiveState)
+      signal,
+      onStateChange: (nextState) => {
+        progressiveState = nextState
+        input.onStateChange?.(nextState)
       },
     })
   } catch (error) {
@@ -267,11 +277,11 @@ async function handleGoalPlanning(input: {
 
   return {
     state: applyGoalPlanToWorkbench({
-      state: applyChatReply(progressiveState, plan.assistantReply),
+      state: progressiveState,
       goal: input.goal,
-      summary: plan.summary,
-      steps: plan.steps,
-      shouldWrite: plan.shouldWrite,
+      summary: result.plan.summary,
+      steps: result.plan.steps,
+      shouldWrite: result.plan.shouldWrite,
     }),
   }
 }
@@ -315,24 +325,21 @@ async function handleChatInput(input: {
     state: input.state,
     message: input.message,
   })
-  const planningState = markAssistantReplyPending(setWorkbenchGoal(chatState, planningGoal))
+  const planningState = setWorkbenchGoal(chatState, planningGoal)
   input.onStateChange(planningState)
   let progressiveState = planningState
 
-  let plan: GoalPlanDraft
+  let result: PlanningLoopResult
 
   try {
-    plan = await createGoalPlan({
+    result = await runPlanningReviewLoop({
+      state: progressiveState,
       goal: planningGoal,
       cliRoot: input.cliRoot,
       signal: input.signal,
-      onThinkingDelta: (delta) => {
-        progressiveState = appendAssistantThinkingDelta(progressiveState, delta)
-        input.onStateChange(progressiveState)
-      },
-      onReplyDelta: (delta) => {
-        progressiveState = appendAssistantReplyDelta(progressiveState, delta)
-        input.onStateChange(progressiveState)
+      onStateChange: (nextState) => {
+        progressiveState = nextState
+        input.onStateChange(nextState)
       },
     })
   } catch (error) {
@@ -350,12 +357,136 @@ async function handleChatInput(input: {
 
   return {
     state: applyGoalPlanToWorkbench({
-      state: applyChatReply(progressiveState, plan.assistantReply),
+      state: progressiveState,
       goal: planningGoal,
-      summary: plan.summary,
-      steps: plan.steps,
-      shouldWrite: plan.shouldWrite,
+      summary: result.plan.summary,
+      steps: result.plan.steps,
+      shouldWrite: result.plan.shouldWrite,
     }),
+  }
+}
+
+async function runPlanningReviewLoop(input: {
+  state: import('@/workbench/types.js').WorkbenchState
+  goal: string
+  cliRoot: string
+  signal: AbortSignal
+  onStateChange: (state: import('@/workbench/types.js').WorkbenchState) => void
+}): Promise<PlanningLoopResult> {
+  const plannerRole = DEFAULT_ROLE_CONFIGS.find((role) => role.roleId === 'goal-planner')
+  const reviewerRole = DEFAULT_ROLE_CONFIGS.find((role) => role.roleId === 'goal-reviewer')
+
+  if (!plannerRole || !reviewerRole) {
+    return { plan: createFallbackPlan(input.goal) }
+  }
+
+  const credentialStore = new FileOAuthCredentialStore()
+  const loginBridge = new PiOAuthLoginBridge()
+  const agentBridge = new PiModelAgentBridge()
+  const credentials = await credentialStore.read(DEFAULT_PROVIDER)
+
+  if (!credentials) {
+    return { plan: createFallbackPlan(input.goal) }
+  }
+
+  const next = await loginBridge.getApiKey({
+    provider: DEFAULT_PROVIDER,
+    credentials: { [DEFAULT_PROVIDER]: credentials },
+  })
+
+  if (!next) {
+    return { plan: createFallbackPlan(input.goal) }
+  }
+
+  await credentialStore.write(DEFAULT_PROVIDER, next.newCredentials)
+
+  let state = input.state
+  let currentPlan: GoalPlanDraft | undefined
+  let latestReview: ReviewResult | undefined
+
+  for (let round = 1; round <= MAX_PLANNING_REVIEW_ROUNDS; round += 1) {
+    state = setWorkbenchExecutionProgress(state, {
+      currentAction: round === 1 ? 'planner drafting initial plan' : `planner revising plan round ${round}`,
+      latestAction: `planning round ${round}`,
+      runtimeStatus: 'thinking',
+    })
+    state = markAssistantReplyPending(state, PLANNER_ACTOR_LABEL)
+    input.onStateChange(state)
+
+    currentPlan = await createGoalPlan({
+      goal: input.goal,
+      cliRoot: input.cliRoot,
+      signal: input.signal,
+      prompt: round === 1
+        ? buildGoalPlanPrompt(input.goal)
+        : buildGoalPlanRevisionPrompt({
+            goal: input.goal,
+            previousPlan: currentPlan ?? createFallbackPlan(input.goal),
+            review: latestReview ?? createAcceptedPlanningReview(),
+            round,
+          }),
+      agentBridge,
+      apiKey: next.apiKey,
+      modelId: resolveProviderModelForRole(plannerRole).resolvedModelId,
+      onThinkingDelta: (delta) => {
+        state = appendAssistantThinkingDelta(state, delta)
+        input.onStateChange(state)
+      },
+      onReplyDelta: (delta) => {
+        state = appendAssistantReplyDelta(state, delta, PLANNER_ACTOR_LABEL)
+        input.onStateChange(state)
+      },
+    })
+
+    state = applyChatReply(state, currentPlan.assistantReply, PLANNER_ACTOR_LABEL)
+    input.onStateChange(state)
+
+    state = setWorkbenchExecutionProgress(state, {
+      currentAction: `reviewer evaluating plan round ${round}`,
+      latestAction: currentPlan.summary,
+      runtimeStatus: 'thinking',
+    })
+    state = markAssistantReplyPending(state, REVIEWER_ACTOR_LABEL)
+    input.onStateChange(state)
+
+    const review = await createPlanningReview({
+      goal: input.goal,
+      plan: currentPlan,
+      cliRoot: input.cliRoot,
+      signal: input.signal,
+      agentBridge,
+      apiKey: next.apiKey,
+      modelId: resolveProviderModelForRole(reviewerRole).resolvedModelId,
+      onThinkingDelta: (delta) => {
+        state = appendAssistantThinkingDelta(state, delta)
+        input.onStateChange(state)
+      },
+      onReplyDelta: (delta) => {
+        state = appendAssistantReplyDelta(state, delta, REVIEWER_ACTOR_LABEL)
+        input.onStateChange(state)
+      },
+    })
+
+    latestReview = review.result
+    state = applyChatReply(state, review.visibleReply, REVIEWER_ACTOR_LABEL)
+    state = applyReviewToWorkbench(state, {
+      latestStatus: review.result.status,
+      latestSummary: review.result.summary,
+      latestFindings: review.result.findings,
+    })
+    input.onStateChange(state)
+
+    if (review.result.status === 'accepted') {
+      return {
+        plan: currentPlan,
+        latestReview,
+      }
+    }
+  }
+
+  return {
+    plan: currentPlan ?? createFallbackPlan(input.goal),
+    latestReview,
   }
 }
 
@@ -626,27 +757,39 @@ async function createGoalPlan(input: {
   signal?: AbortSignal
   onThinkingDelta?: (delta: string) => void
   onReplyDelta?: (delta: string) => void
+  prompt?: string
+  apiKey?: string
+  modelId?: string
+  agentBridge?: PiModelAgentBridge
 }): Promise<GoalPlanDraft> {
   try {
-    const credentialStore = new FileOAuthCredentialStore()
-    const loginBridge = new PiOAuthLoginBridge()
-    const agentBridge = new PiModelAgentBridge()
-    const credentials = await credentialStore.read(DEFAULT_PROVIDER)
+    const agentBridge = input.agentBridge ?? new PiModelAgentBridge()
+    const prompt = input.prompt ?? buildGoalPlanPrompt(input.goal)
+    const modelId = input.modelId ?? DEFAULT_MODEL_ID
 
-    if (!credentials) {
-      return createFallbackPlan(input.goal)
+    let apiKey = input.apiKey
+
+    if (!apiKey) {
+      const credentialStore = new FileOAuthCredentialStore()
+      const loginBridge = new PiOAuthLoginBridge()
+      const credentials = await credentialStore.read(DEFAULT_PROVIDER)
+
+      if (!credentials) {
+        return createFallbackPlan(input.goal)
+      }
+
+      const next = await loginBridge.getApiKey({
+        provider: DEFAULT_PROVIDER,
+        credentials: { [DEFAULT_PROVIDER]: credentials },
+      })
+
+      if (!next) {
+        return createFallbackPlan(input.goal)
+      }
+
+      await credentialStore.write(DEFAULT_PROVIDER, next.newCredentials)
+      apiKey = next.apiKey
     }
-
-    const next = await loginBridge.getApiKey({
-      provider: DEFAULT_PROVIDER,
-      credentials: { [DEFAULT_PROVIDER]: credentials },
-    })
-
-    if (!next) {
-      return createFallbackPlan(input.goal)
-    }
-
-    await credentialStore.write(DEFAULT_PROVIDER, next.newCredentials)
 
     let responseText = ''
     let visibleReply = ''
@@ -654,9 +797,9 @@ async function createGoalPlan(input: {
     for await (const event of agentBridge.promptStream({
       cwd: input.cliRoot,
       provider: DEFAULT_PROVIDER,
-      modelId: DEFAULT_MODEL_ID,
-      prompt: buildGoalPlanPrompt(input.goal),
-      apiKey: next.apiKey,
+      modelId,
+      prompt,
+      apiKey,
       signal: input.signal,
     })) {
       if (event.type === 'thinking-delta' && event.text) {
@@ -685,6 +828,69 @@ async function createGoalPlan(input: {
   }
 }
 
+async function createPlanningReview(input: {
+  goal: string
+  plan: GoalPlanDraft
+  cliRoot: string
+  signal?: AbortSignal
+  agentBridge: PiModelAgentBridge
+  apiKey: string
+  modelId: string
+  onThinkingDelta?: (delta: string) => void
+  onReplyDelta?: (delta: string) => void
+}): Promise<{ result: ReviewResult; visibleReply: string }> {
+  try {
+    let responseText = ''
+    let visibleReply = ''
+
+    for await (const event of input.agentBridge.promptStream({
+      cwd: input.cliRoot,
+      provider: DEFAULT_PROVIDER,
+      modelId: input.modelId,
+      prompt: buildPlanningReviewPrompt({
+        goal: input.goal,
+        plan: input.plan,
+      }),
+      apiKey: input.apiKey,
+      signal: input.signal,
+    })) {
+      if (event.type === 'thinking-delta' && event.text) {
+        input.onThinkingDelta?.(event.text)
+      }
+
+      if (event.type === 'text-delta' && event.text) {
+        responseText += event.text
+        const nextVisibleReply = extractTaggedBlock({
+          text: responseText,
+          tagName: 'review_reply',
+        })
+        const replyDelta = nextVisibleReply.slice(visibleReply.length)
+
+        if (replyDelta) {
+          visibleReply = nextVisibleReply
+          input.onReplyDelta?.(replyDelta)
+        }
+      }
+    }
+
+    return {
+      result: parsePlanningReviewResponse(responseText),
+      visibleReply: visibleReply.trim() || formatPlanningReviewReply(createAcceptedPlanningReview()),
+    }
+  } catch (error) {
+    if (isAbortError(error, input.signal)) {
+      throw error
+    }
+
+    const fallbackReview = createAcceptedPlanningReview()
+
+    return {
+      result: fallbackReview,
+      visibleReply: formatPlanningReviewReply(fallbackReview),
+    }
+  }
+}
+
 function isAbortError(error: unknown, signal?: AbortSignal): boolean {
   if (signal?.aborted) {
     return true
@@ -695,8 +901,11 @@ function isAbortError(error: unknown, signal?: AbortSignal): boolean {
 
 function buildGoalPlanPrompt(goal: string): string {
   return [
-    '你是 apps/oc-pi-cli 的工作台规划助手。',
+    '你是一个产品规划助手，负责帮助用户把需求整理成可讨论、可修正、可执行的产品方案。',
     '请先判断这个目标是否需要实际写文件。',
+    '不要擅自假设产品形态、客户端类型、技术栈、运行平台或交付媒介。',
+    '除非用户明确说明，否则不要默认它是 apps/oc-pi-cli、TUI、CLI、Web、iOS、Android、桌面端或某种既定仓库内产品。',
+    '如果用户没有提供关键产品边界，例如目标用户、平台形态、多端范围、核心场景，你应先在 assistant_plan 中明确这些仍待确认，而不是私自补全为某种实现形态。',
     '请严格输出两个区块，先输出给用户看的规划回复，再输出 JSON。',
     '输出格式必须是：',
     '<assistant_plan>',
@@ -710,7 +919,58 @@ function buildGoalPlanPrompt(goal: string): string {
     '- shouldWrite 表示执行阶段是否需要落地写入文件；若仅适合预览分析则为 false',
     '- steps 给出 3 到 5 条中文短步骤',
     '- assistant_plan 必须是自然中文，不要解释标签规则',
+    '- 若产品形态尚未确定，assistant_plan 应先提出待确认项，例如 Web / iOS / Android / 小程序 / 桌面端，而不是直接替用户决定。',
     `goal: ${goal}`,
+  ].join('\n')
+}
+
+function buildGoalPlanRevisionPrompt(input: {
+  goal: string
+  previousPlan: GoalPlanDraft
+  review: ReviewResult
+  round: number
+}): string {
+  return [
+    buildGoalPlanPrompt(input.goal),
+    '',
+    `你正在处理第 ${input.round} 轮审查后的修订。`,
+    '上一版规划回复：',
+    input.previousPlan.assistantReply,
+    '',
+    '上一轮审查结果：',
+    formatPlanningReviewRaw(input.review),
+    '',
+    '请根据审查意见修订规划；若某条意见不合理，可在 assistant_plan 中简要说明保留理由。',
+  ].join('\n')
+}
+
+function buildPlanningReviewPrompt(input: {
+  goal: string
+  plan: GoalPlanDraft
+}): string {
+  return [
+    '你是 goal-reviewer 目标审查者。',
+    '请审查下面的应用规划方案。',
+    '重点检查规划是否擅自假设了用户没有明确给出的产品形态、技术栈、平台或实现边界。',
+    '如果规划把一个未明确的需求直接写成 TUI、CLI、Web、iOS 等具体形态，应返回 changes-requested。',
+    '请严格输出两个区块：',
+    '<review_reply>',
+    '这里写给用户看的自然中文审查意见，说明是通过还是需要修改，并给出关键问题。',
+    '</review_reply>',
+    '<review_result>',
+    'STATUS: accepted 或 STATUS: changes-requested',
+    'SUMMARY: 一句中文摘要',
+    '可选输出 1 到 3 行 FINDING: <问题描述>',
+    '</review_result>',
+    '',
+    `原始用户目标: ${input.goal}`,
+    '',
+    '待审规划回复：',
+    input.plan.assistantReply,
+    '',
+    '结构化方案摘要：',
+    `SUMMARY: ${input.plan.summary}`,
+    ...input.plan.steps.map((step, index) => `STEP ${index + 1}: ${step}`),
   ].join('\n')
 }
 
@@ -749,16 +1009,41 @@ function parseGoalPlanResponse(text: string, goal: string, assistantReply?: stri
   }
 }
 
+function parsePlanningReviewResponse(text: string): ReviewResult {
+  const reviewResultText = extractTaggedBlock({
+    text,
+    tagName: 'review_result',
+  })
+
+  const statusMatch = reviewResultText.match(/^STATUS:\s*(accepted|changes-requested)$/m)
+  const summaryMatch = reviewResultText.match(/^SUMMARY:\s*(.+)$/m)
+  const findings = reviewResultText
+    .split('\n')
+    .filter((line) => line.startsWith('FINDING:'))
+    .map((line) => ({
+      message: line.replace(/^FINDING:\s*/, '').trim(),
+      severity: 'medium' as const,
+    }))
+
+  return {
+    artifactSlotId: 'product-goal',
+    reviewerRoleId: 'goal-reviewer',
+    status: statusMatch?.[1] === 'changes-requested' ? 'changes-requested' : 'accepted',
+    summary: summaryMatch?.[1]?.trim() ?? '规划审查通过',
+    findings,
+  }
+}
+
 function createFallbackPlan(goal: string): GoalPlanDraft {
   const shouldWrite = /生成|写入|更新|落地|文档|docs|文件/.test(goal)
   const summary = shouldWrite
-    ? `我建议先确认目标边界，然后执行四阶段 goal-to-docs，并根据运行阶段决定写入 sandbox 还是 workspace docs。`
-    : '我建议先做预览分析，确认范围与阶段输出后再决定是否写入。'
+    ? '我建议先确认产品边界与交付形态，再整理分阶段方案，并在你确认后落到文档。'
+    : '我建议先澄清目标范围、用户场景与交付形态，再继续细化方案。'
   const steps = [
-    '确认目标范围与输出边界',
-    '生成四阶段执行方案',
+    '确认目标用户、核心场景与产品边界',
+    '确认产品形态与平台范围',
     '根据对话继续补充或调整方案',
-    shouldWrite ? '确认后执行并输出结果文件摘要' : '确认后执行预览并等待下一步确认',
+    shouldWrite ? '确认后整理并输出文档结果' : '继续补充信息后再决定是否落文档',
   ]
 
   return {
@@ -773,20 +1058,40 @@ function createFallbackPlan(goal: string): GoalPlanDraft {
   }
 }
 
+function createAcceptedPlanningReview(): ReviewResult {
+  return {
+    artifactSlotId: 'product-goal',
+    reviewerRoleId: 'goal-reviewer',
+    status: 'accepted',
+    summary: '规划结构清晰，可以继续。',
+    findings: [],
+  }
+}
+
 function extractAssistantPlanReply(text: string): string {
-  const openTag = '<assistant_plan>'
-  const closeTag = '</assistant_plan>'
-  const startIndex = text.indexOf(openTag)
+  return extractTaggedBlock({
+    text,
+    tagName: 'assistant_plan',
+  })
+}
+
+function extractTaggedBlock(input: {
+  text: string
+  tagName: string
+}): string {
+  const openTag = `<${input.tagName}>`
+  const closeTag = `</${input.tagName}>`
+  const startIndex = input.text.indexOf(openTag)
 
   if (startIndex < 0) {
     return ''
   }
 
   const contentStart = startIndex + openTag.length
-  const endIndex = text.indexOf(closeTag, contentStart)
+  const endIndex = input.text.indexOf(closeTag, contentStart)
   const content = endIndex >= 0
-    ? text.slice(contentStart, endIndex)
-    : stripIncompleteXmlLikeTail(text.slice(contentStart))
+    ? input.text.slice(contentStart, endIndex)
+    : stripIncompleteXmlLikeTail(input.text.slice(contentStart))
 
   return content.replace(/^\s+/, '')
 }
@@ -821,6 +1126,31 @@ function formatGoalPlanAssistantReply(input: {
     input.shouldWrite
       ? '如果你认可这个方案，可以直接说“可以落文档”，或使用 /docs-exec-confirm。'
       : '如果你认可这个方案，可以直接说“开始执行”，或使用 /docs-exec-confirm。',
+  ].join('\n')
+}
+
+function formatPlanningReviewReply(review: ReviewResult): string {
+  const header = review.status === 'accepted'
+    ? `审查通过：${review.summary}`
+    : `需要修改：${review.summary}`
+
+  if (review.findings.length === 0) {
+    return header
+  }
+
+  return [
+    header,
+    '',
+    '审查意见：',
+    ...review.findings.map((finding, index) => `${index + 1}. ${finding.message}`),
+  ].join('\n')
+}
+
+function formatPlanningReviewRaw(review: ReviewResult): string {
+  return [
+    `STATUS: ${review.status}`,
+    `SUMMARY: ${review.summary}`,
+    ...review.findings.map((finding) => `FINDING: ${finding.message}`),
   ].join('\n')
 }
 

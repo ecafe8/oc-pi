@@ -14,6 +14,7 @@ export interface TimelineItem {
   summary: string;
   createdAt: string;
   messageType?: 'user' | 'assistant-plan' | 'assistant-stream' | 'system-status' | 'result';
+  actorLabel?: string;
   isStreaming?: boolean;
 }
 

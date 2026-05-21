@@ -22,6 +22,7 @@ export interface PresentedWorkbenchState {
       type: string
       summary: string
       createdAt: string
+      actorLabel?: string
       isStreaming: boolean
     }>
   }
@@ -99,6 +100,7 @@ export function presentWorkbenchState(
         type: item.messageType ?? item.type,
         summary: item.summary,
         createdAt: item.createdAt,
+        actorLabel: item.actorLabel,
         isStreaming: item.isStreaming ?? false,
       })),
     },

@@ -105,21 +105,24 @@ export function handleChatMessage(
 export function applyChatReply(
   state: WorkbenchState,
   reply: string,
+  actorLabel?: string,
 ): WorkbenchState {
-  return finishWorkbenchAssistantReply(state, reply)
+  return finishWorkbenchAssistantReply(state, reply, actorLabel)
 }
 
 export function markAssistantReplyPending(
   state: WorkbenchState,
+  actorLabel?: string,
 ): WorkbenchState {
-  return startWorkbenchAssistantReply(state)
+  return startWorkbenchAssistantReply(state, actorLabel)
 }
 
 export function appendAssistantReplyDelta(
   state: WorkbenchState,
   delta: string,
+  actorLabel?: string,
 ): WorkbenchState {
-  return updateWorkbenchAssistantReplyDelta(state, delta)
+  return updateWorkbenchAssistantReplyDelta(state, delta, actorLabel)
 }
 
 export function appendAssistantThinkingDelta(

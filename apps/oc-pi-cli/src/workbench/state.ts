@@ -227,6 +227,7 @@ export function clearWorkbenchPendingExecution(state: WorkbenchState): Workbench
 
 export function startWorkbenchAssistantReply(
   state: WorkbenchState,
+  actorLabel = 'Assistant',
 ): WorkbenchState {
   return addTimelineItem(
     {
@@ -243,23 +244,27 @@ export function startWorkbenchAssistantReply(
         liveDraftCollapsed: state.execution.liveDraftCollapsed,
       },
     },
-    {
-      type: 'system-summary',
-      summary: '',
-      createdAt: new Date().toISOString(),
-      messageType: 'assistant-stream',
-      isStreaming: true,
-    },
-  )
+      {
+        type: 'system-summary',
+        summary: '',
+        createdAt: new Date().toISOString(),
+        messageType: 'assistant-stream',
+        actorLabel,
+        isStreaming: true,
+      },
+    )
 }
 
 export function finishWorkbenchAssistantReply(
   state: WorkbenchState,
   reply: string,
+  actorLabel?: string,
 ): WorkbenchState {
   const items = [...state.timeline.items]
   const streamingIndex = items.findLastIndex(
-    (item) => item.messageType === 'assistant-stream' && item.isStreaming,
+    (item) => item.messageType === 'assistant-stream'
+      && item.isStreaming
+      && (actorLabel ? item.actorLabel === actorLabel : true),
   )
 
   if (streamingIndex >= 0) {
@@ -273,14 +278,15 @@ export function finishWorkbenchAssistantReply(
       }
     }
   } else {
-    items.push({
-      type: 'system-summary',
-      summary: reply,
-      createdAt: new Date().toISOString(),
-      messageType: 'assistant-stream',
-      isStreaming: false,
-    })
-  }
+      items.push({
+        type: 'system-summary',
+        summary: reply,
+        createdAt: new Date().toISOString(),
+        messageType: 'assistant-stream',
+        actorLabel,
+        isStreaming: false,
+      })
+    }
 
   return {
     ...setWorkbenchRuntimeStatus(state, 'idle'),
@@ -304,10 +310,13 @@ export function finishWorkbenchAssistantReply(
 export function updateWorkbenchAssistantReplyDelta(
   state: WorkbenchState,
   delta: string,
+  actorLabel?: string,
 ): WorkbenchState {
   const items = [...state.timeline.items]
   const streamingIndex = items.findLastIndex(
-    (item) => item.messageType === 'assistant-stream' && item.isStreaming,
+    (item) => item.messageType === 'assistant-stream'
+      && item.isStreaming
+      && (actorLabel ? item.actorLabel === actorLabel : true),
   )
 
   if (streamingIndex >= 0) {
