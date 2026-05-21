@@ -50,6 +50,8 @@ interface GoalPlanDraft {
   summary: string
   steps: string[]
   shouldWrite: boolean
+  needsUserConfirmation: boolean
+  missingInformation: string[]
 }
 
 interface PlanningLoopResult {
@@ -74,8 +76,9 @@ const DISABLE_MOUSE_REPORTING = '\u001b[?1000l\u001b[?1006l'
 
 export async function startWorkbench(options: StartWorkbenchOptions): Promise<void> {
   const sessionStore = new FileRuntimeSessionStore(options.workspacePath)
-  let session = await sessionStore.read()
-  let state = session?.workbenchState ?? createDefaultWorkbenchState(options.workspacePath)
+  let session: { workbenchState: import('@/workbench/types.js').WorkbenchState; latestRun?: GoalToDocsRunRecord } | undefined
+  let hasActiveSession = false
+  let state = createDefaultWorkbenchState(options.workspacePath)
   let isBusy = false
   let hasStopped = false
   let activeChatAbortController: AbortController | undefined
@@ -134,12 +137,23 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
             },
           })
           state = result.state
+          if (activatesSession(parsedCommand.commandName)) {
+            hasActiveSession = true
+          }
           session = {
             workbenchState: state,
             latestRun: result.latestRun ?? session?.latestRun,
           }
           }
         } else {
+          if (!hasActiveSession) {
+            session = await sessionStore.createSession(createSessionNameFromInput(trimmed))
+            state = session.workbenchState
+            hasActiveSession = true
+            rootView.setState(state)
+            tui.requestRender(true)
+          }
+
           activeChatAbortController = new AbortController()
           const result = await handleChatInput({
             state,
@@ -162,11 +176,13 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
       rootView.setState(state)
       tui.requestRender(true)
 
-        await sessionStore.write({
-          workbenchState: state,
-          latestRun: session?.latestRun,
-        })
-        session = await sessionStore.read()
+        if (hasActiveSession) {
+          await sessionStore.write({
+            workbenchState: state,
+            latestRun: session?.latestRun,
+          })
+          session = await sessionStore.read() ?? session
+        }
       } finally {
         activeChatAbortController = undefined
         escapePressCount = 0
@@ -439,7 +455,21 @@ async function runPlanningReviewLoop(input: {
     })
 
     state = applyChatReply(state, currentPlan.assistantReply, PLANNER_ACTOR_LABEL)
+    state = setWorkbenchExecutionProgress(state, {
+      currentAction: currentPlan.needsUserConfirmation
+        ? 'waiting for user clarification'
+        : `reviewer evaluating plan round ${round}`,
+      latestAction: currentPlan.summary,
+      runtimeStatus: 'idle',
+    })
     input.onStateChange(state)
+
+    if (currentPlan.needsUserConfirmation) {
+      return {
+        plan: currentPlan,
+        latestReview,
+      }
+    }
 
     state = setWorkbenchExecutionProgress(state, {
       currentAction: `reviewer evaluating plan round ${round}`,
@@ -910,16 +940,22 @@ function buildGoalPlanPrompt(goal: string): string {
     '输出格式必须是：',
     '<assistant_plan>',
     '这里写给用户看的中文规划回复，包含：目标理解、3-5 条步骤、可继续修改或确认执行的提示。',
+    '优先使用 Markdown 语义来表达重点，例如：**待确认**、**建议**、> 风险、- 列表、1. 步骤、`关键术语`。',
     '</assistant_plan>',
     '<plan_json>',
-    '{"summary":"string","shouldWrite":true,"steps":["step 1","step 2","step 3"]}',
+    '{"summary":"string","shouldWrite":true,"steps":["step 1","step 2","step 3"],"needsUserConfirmation":false,"missingInformation":["待确认项 1"]}',
     '</plan_json>',
     '规则:',
     '- summary 必须是一段简短中文执行方案',
     '- shouldWrite 表示执行阶段是否需要落地写入文件；若仅适合预览分析则为 false',
     '- steps 给出 3 到 5 条中文短步骤',
+    '- needsUserConfirmation 表示当前规划是否因为缺少必要信息而必须等待用户补充，若为 true，则暂时不要进入 reviewer 审查。',
+    '- missingInformation 用中文列出 1 到 5 条待用户确认的信息；若不缺信息则返回空数组。',
     '- assistant_plan 必须是自然中文，不要解释标签规则',
     '- 若产品形态尚未确定，assistant_plan 应先提出待确认项，例如 Web / iOS / Android / 小程序 / 桌面端，而不是直接替用户决定。',
+    '- 如果存在待确认问题，优先使用 `**待确认**:` 或 `**需要确认**:` 开头。',
+    '- 如果存在明确建议，优先使用 `**建议**:` 或编号列表。',
+    '- 如果存在明显风险或假设，优先使用 `> 风险:` 或 `> 假设:` 形式。',
     `goal: ${goal}`,
   ].join('\n')
 }
@@ -955,7 +991,7 @@ function buildPlanningReviewPrompt(input: {
     '如果规划把一个未明确的需求直接写成 TUI、CLI、Web、iOS 等具体形态，应返回 changes-requested。',
     '请严格输出两个区块：',
     '<review_reply>',
-    '这里写给用户看的自然中文审查意见，说明是通过还是需要修改，并给出关键问题。',
+    '这里写给用户看的自然中文审查意见，说明是通过还是需要修改，并给出关键问题。优先使用 Markdown 语义高亮重点，例如 **建议**、> 风险、- 列表。',
     '</review_reply>',
     '<review_result>',
     'STATUS: accepted 或 STATUS: changes-requested',
@@ -988,6 +1024,8 @@ function parseGoalPlanResponse(text: string, goal: string, assistantReply?: stri
       summary?: string
       shouldWrite?: boolean
       steps?: string[]
+      needsUserConfirmation?: boolean
+      missingInformation?: string[]
     }
 
     if (!parsed.summary || !Array.isArray(parsed.steps) || parsed.steps.length === 0) {
@@ -999,10 +1037,14 @@ function parseGoalPlanResponse(text: string, goal: string, assistantReply?: stri
         summary: parsed.summary,
         shouldWrite: parsed.shouldWrite ?? true,
         steps: parsed.steps.slice(0, 5),
+        needsUserConfirmation: parsed.needsUserConfirmation ?? false,
+        missingInformation: normalizeMissingInformation(parsed.missingInformation),
       }),
       summary: parsed.summary,
       shouldWrite: parsed.shouldWrite ?? true,
       steps: parsed.steps.slice(0, 5),
+      needsUserConfirmation: parsed.needsUserConfirmation ?? false,
+      missingInformation: normalizeMissingInformation(parsed.missingInformation),
     }
   } catch {
     return createFallbackPlan(goal)
@@ -1051,10 +1093,20 @@ function createFallbackPlan(goal: string): GoalPlanDraft {
       summary,
       shouldWrite,
       steps,
+      needsUserConfirmation: true,
+      missingInformation: [
+        '目标用户是谁',
+        '产品形态与平台范围是什么',
+      ],
     }),
     summary,
     shouldWrite,
     steps,
+    needsUserConfirmation: true,
+    missingInformation: [
+      '目标用户是谁',
+      '产品形态与平台范围是什么',
+    ],
   }
 }
 
@@ -1112,11 +1164,36 @@ function stripIncompleteXmlLikeTail(text: string): string {
   return text.slice(0, lastTagStart)
 }
 
+function normalizeMissingInformation(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+    .slice(0, 5)
+}
+
 function formatGoalPlanAssistantReply(input: {
   summary: string
   steps: string[]
   shouldWrite: boolean
+  needsUserConfirmation: boolean
+  missingInformation: string[]
 }): string {
+  if (input.needsUserConfirmation && input.missingInformation.length > 0) {
+    return [
+      input.summary,
+      '',
+      '**待确认**：',
+      ...input.missingInformation.map((item, index) => `${index + 1}. ${item}`),
+      '',
+      '请先补充这些信息，我会基于你的回复继续完善方案。',
+    ].join('\n')
+  }
+
   return [
     input.summary,
     '',
@@ -1249,6 +1326,24 @@ function shouldConfirmDocsExecution(
     /就按这个执行/,
     /按这个写/, 
   ].some((pattern) => pattern.test(normalizedMessage))
+}
+
+function activatesSession(commandName: string): boolean {
+  return [
+    '/session-new',
+    '/session-resume',
+    '/session-fork',
+  ].includes(commandName)
+}
+
+function createSessionNameFromInput(message: string): string {
+  const trimmed = message.trim()
+
+  if (!trimmed) {
+    return 'New Workbench Session'
+  }
+
+  return trimmed.length > 24 ? `${trimmed.slice(0, 24)}...` : trimmed
 }
 
 function filterSessionSuggestions(input: {

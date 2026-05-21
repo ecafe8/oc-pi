@@ -4,6 +4,7 @@ import {
   Editor,
   type Focusable,
   Key,
+  Markdown,
   matchesKey,
   type SlashCommand,
   type TUI,
@@ -17,6 +18,30 @@ import type { WorkbenchState } from "@/workbench/types.js";
 const MIN_INFO_PANE_WIDTH = 28;
 const INFO_PANE_RATIO = 0.34;
 const LIVE_DRAFT_MAX_HEIGHT = 6;
+const INPUT_BG = "\u001b[48;5;236m";
+const INPUT_BG_ACTIVE = "\u001b[48;5;238m";
+const INPUT_FG = "\u001b[38;5;255m";
+const USER_CHAT_BG = "\u001b[48;5;238m";
+const ASSISTANT_CHAT_BG = "\u001b[48;5;235m";
+const SYSTEM_CHAT_BG = "\u001b[48;5;237m";
+const RESULT_CHAT_BG = "\u001b[48;5;240m";
+const USER_LABEL_FG = "\u001b[38;5;153m";
+const PLANNER_LABEL_FG = "\u001b[38;5;81m";
+const REVIEWER_LABEL_FG = "\u001b[38;5;221m";
+const ASSISTANT_LABEL_FG = "\u001b[38;5;159m";
+const SYSTEM_LABEL_FG = "\u001b[38;5;250m";
+const RESULT_LABEL_FG = "\u001b[38;5;120m";
+const USER_ACCENT = "\u001b[38;5;153m";
+const PLANNER_ACCENT = "\u001b[38;5;81m";
+const REVIEWER_ACCENT = "\u001b[38;5;221m";
+const ASSISTANT_ACCENT = "\u001b[38;5;159m";
+const SYSTEM_ACCENT = "\u001b[38;5;245m";
+const RESULT_ACCENT = "\u001b[38;5;120m";
+const MARKDOWN_BOLD_FG = "\u001b[38;5;230m";
+const MARKDOWN_CODE_FG = "\u001b[38;5;186m";
+const MARKDOWN_QUOTE_FG = "\u001b[38;5;180m";
+const MARKDOWN_QUOTE_PREFIX_FG = "\u001b[38;5;144m";
+const ANSI_RESET = "\u001b[0m";
 type ScrollPane = "chat" | "thinking" | "draft" | "info";
 
 interface RenderLayoutMetrics {
@@ -25,6 +50,8 @@ interface RenderLayoutMetrics {
   chatWidth: number;
   thinkingStartRow: number;
   thinkingHeight: number;
+  suggestionStartRow?: number;
+  suggestionHeight?: number;
 }
 
 export interface WorkbenchRootViewOptions {
@@ -42,6 +69,11 @@ export interface WorkbenchViewCommandResult {
 
 export class WorkbenchRootView implements Component, Focusable {
   private readonly editor: Editor;
+  private readonly assistantMarkdown = new Markdown("", 0, 0, WORKBENCH_MARKDOWN_THEME, {
+    color: (text: string): string => text,
+  });
+  private readonly getSessionSuggestions: (query: string) => Promise<RuntimeSessionListItem[]>;
+  private readonly onSubmit: (value: string) => void;
   private readonly tui: TUI;
   private state: WorkbenchState;
   private chatScrollOffset = 0;
@@ -57,10 +89,16 @@ export class WorkbenchRootView implements Component, Focusable {
   private cancelHintRemainingEsc = 0;
   private shimmerFrame = 0;
   private shimmerTimer: ReturnType<typeof setInterval> | undefined;
+  private lastEditorValue = "";
+  private inlineSessionSuggestions: RuntimeSessionListItem[] = [];
+  private sessionSuggestionRequestId = 0;
+  private selectedSessionSuggestionIndex = 0;
 
   public constructor(options: WorkbenchRootViewOptions) {
     this.tui = options.tui;
     this.state = options.state;
+    this.getSessionSuggestions = options.getSessionSuggestions;
+    this.onSubmit = options.onSubmit;
     this.editor = new Editor(options.tui, EDITOR_THEME, {
       paddingX: 0,
       autocompleteMaxVisible: 6,
@@ -68,8 +106,12 @@ export class WorkbenchRootView implements Component, Focusable {
     this.editor.setAutocompleteProvider(
       new CombinedAutocompleteProvider(createWorkbenchCommands(options.getSessionSuggestions), options.workspacePath),
     );
+    this.editor.onChange = (value) => {
+      this.lastEditorValue = value;
+      void this.refreshInlineSessionSuggestions(value);
+    };
     this.editor.onSubmit = (value) => {
-      options.onSubmit(value);
+      this.onSubmit(value);
       this.editor.setText("");
     };
   }
@@ -126,11 +168,46 @@ export class WorkbenchRootView implements Component, Focusable {
       return;
     }
 
+    if (this.inlineSessionSuggestions.length > 0) {
+      if (matchesKey(data, "up")) {
+        this.selectedSessionSuggestionIndex = Math.max(0, this.selectedSessionSuggestionIndex - 1);
+        this.invalidate();
+        this.tui.requestRender(true);
+        return;
+      }
+
+      if (matchesKey(data, "down")) {
+        this.selectedSessionSuggestionIndex = Math.min(
+          this.inlineSessionSuggestions.length - 1,
+          this.selectedSessionSuggestionIndex + 1,
+        );
+        this.invalidate();
+        this.tui.requestRender(true);
+        return;
+      }
+
+      if (matchesKey(data, "tab")) {
+        this.applySelectedSessionSuggestion(false);
+        return;
+      }
+
+      if (matchesKey(data, "enter")) {
+        this.applySelectedSessionSuggestion(true);
+        return;
+      }
+    }
+
     if (this.inputLocked) {
       return;
     }
 
+    const previousValue = this.lastEditorValue;
+
     this.editor.handleInput(data);
+
+    if (matchesKey(data, "tab") && previousValue !== this.lastEditorValue) {
+      void this.refreshInlineSessionSuggestions(this.lastEditorValue);
+    }
   }
 
   public invalidate(): void {
@@ -197,6 +274,11 @@ export class WorkbenchRootView implements Component, Focusable {
   public render(width: number): string[] {
     const view = presentWorkbenchState(this.state);
     const safeWidth = Math.max(width, 40);
+
+    if (view.chatPane.messages.length === 0) {
+      return this.renderEmptyLandingView(safeWidth, view);
+    }
+
     const infoWidth = Math.max(MIN_INFO_PANE_WIDTH, Math.floor(safeWidth * INFO_PANE_RATIO));
     const dividerWidth = 3;
     const chatWidth = Math.max(20, safeWidth - infoWidth - dividerWidth);
@@ -291,10 +373,31 @@ export class WorkbenchRootView implements Component, Focusable {
     }
 
     for (const message of view.chatPane.messages) {
-      const label = toMessagePrefix(message.type, message.actorLabel);
-      const content = `${label}: ${message.summary}`;
+      const label = formatMessageLabel(message.type, message.actorLabel);
+      const background = resolveChatMessageBackground(message.type);
+      const accent = resolveChatMessageAccent(message.type, message.actorLabel);
 
-      lines.push(...wrapTextWithAnsi(content, width));
+      if (message.type.startsWith("assistant")) {
+        this.assistantMarkdown.setText(message.summary);
+        const markdownLines = this.assistantMarkdown.render(Math.max(1, width - 2));
+
+        lines.push(
+          ...markdownLines.map((line, index) => {
+            const content = index === 0 ? `${label}: ${line}` : `  ${line}`;
+            return applyBlockBackground(content, width, background, accent);
+          }),
+        );
+
+        continue;
+      }
+
+      const content = `${label}: ${applyInlineMarkdownHighlights(message.summary)}`;
+
+      lines.push(
+        ...wrapTextWithAnsi(content, width).map((line) =>
+          applyBlockBackground(line, width, background, accent),
+        ),
+      );
     }
 
     return lines;
@@ -527,17 +630,146 @@ export class WorkbenchRootView implements Component, Focusable {
 
   private renderComposerLines(width: number): string[] {
     if (!this.inputLocked) {
-      return this.editor.render(Math.max(20, width));
+      const editorLines = this.decorateComposerBox(this.editor.render(Math.max(20, width)), width, false);
+      const suggestionLines = this.renderInlineSessionSuggestionLines(width);
+
+      return [...editorLines, ...suggestionLines];
     }
 
-    return this.renderLockedComposerLines(width);
+    return this.decorateComposerBox(this.renderLockedComposerLines(width), width, true);
   }
 
   private renderLockedComposerLines(width: number): string[] {
-    const border = "".padEnd(Math.max(1, width), "─");
     const message = truncateToWidth(` AI 处理中${this.resolveShimmerSuffix()}`, width, "...", true);
 
-    return [border, message.padEnd(width, " "), border];
+    return [message.padEnd(width, " ")];
+  }
+
+  private decorateComposerBox(lines: string[], width: number, locked: boolean): string[] {
+    const background = locked ? INPUT_BG_ACTIVE : INPUT_BG;
+    const normalizedLines = lines.length > 0 ? lines : [""];
+
+    return normalizedLines.map((line) => {
+      const content = truncateToWidth(line, width, "...", true).padEnd(width, " ");
+      return `${background}${INPUT_FG}${content}${ANSI_RESET}`;
+    });
+  }
+
+  private renderEmptyLandingView(width: number, view: ReturnType<typeof presentWorkbenchState>): string[] {
+    const promptWidth = Math.max(32, Math.min(width - 8, Math.floor(width * 0.7)));
+    const sidePadding = " ".repeat(Math.max(0, Math.floor((width - promptWidth) / 2)));
+    const title = truncateToWidth("Start A New Session", promptWidth, "...", true);
+    const subtitleLines = wrapTextWithAnsi(
+      "描述你想规划的应用、目标用户和核心场景。首次发送后会自动创建新 session；也可以用 /session-resume 恢复已有会话。",
+      promptWidth,
+    );
+    const composerLabel = truncateToWidth(
+      this.inputLocked
+        ? "> AI 处理中 | 输入已暂停"
+        : "> 新对话输入区 | 输入后自动创建 session | /session-resume 恢复历史会话",
+      promptWidth,
+      "...",
+      true,
+    );
+    const composerLines = this.renderComposerLines(promptWidth);
+    const blankRows = Math.max(2, Math.floor((this.tui.terminal.rows - subtitleLines.length - composerLines.length - 6) / 2));
+
+    return [
+      ...Array.from({ length: blankRows }, () => ""),
+      `${sidePadding}${title}`,
+      "",
+      ...subtitleLines.map((line) => `${sidePadding}${line}`),
+      "",
+      `${sidePadding}${composerLabel}`,
+      ...composerLines.map((line) => `${sidePadding}${line}`),
+      "",
+      `${sidePadding}${truncateToWidth(`model: ${view.topBar.modelId} | status: ${view.topBar.runtimeStatus}`, promptWidth, "...", true)}`,
+    ];
+  }
+
+  private renderInlineSessionSuggestionLines(width: number): string[] {
+    if (this.inlineSessionSuggestions.length === 0) {
+      return [];
+    }
+
+    const lines = [
+      `${SYSTEM_LABEL_FG}${truncateToWidth("resume candidates  ↑↓ select  tab/enter apply", width, "...", true)}${ANSI_RESET}`,
+    ];
+
+    for (const [index, session] of this.inlineSessionSuggestions.slice(0, 6).entries()) {
+      const label = normalizeSingleLineText(
+        session.sessionName
+          ? `${session.sessionName} (${session.sessionId.slice(0, 8)})`
+          : session.sessionId,
+      );
+      const detailText = resolveSessionSuggestionDetail(session);
+      const detail = detailText ? ` - ${detailText}` : "";
+      const prefix = index === this.selectedSessionSuggestionIndex ? ">" : " ";
+      const lineText = truncateToWidth(`${prefix} ${label}${detail}`, width, "...", true);
+      const lineColor = index === this.selectedSessionSuggestionIndex ? PLANNER_ACCENT : SYSTEM_ACCENT;
+
+      lines.push(
+        `${lineColor}${lineText}${ANSI_RESET}`,
+      );
+    }
+
+    return lines;
+  }
+
+  private async refreshInlineSessionSuggestions(value: string): Promise<void> {
+    const query = parseSessionSuggestionQuery(value);
+
+    if (query === null) {
+      if (this.inlineSessionSuggestions.length > 0) {
+        this.inlineSessionSuggestions = [];
+        this.invalidate();
+        this.tui.requestRender(true);
+      }
+
+      return;
+    }
+
+    const requestId = ++this.sessionSuggestionRequestId;
+    const suggestions = await this.getSessionSuggestions(query);
+
+    if (requestId !== this.sessionSuggestionRequestId) {
+      return;
+    }
+
+    this.inlineSessionSuggestions = suggestions;
+    this.selectedSessionSuggestionIndex = suggestions.length === 0
+      ? 0
+      : Math.min(this.selectedSessionSuggestionIndex, suggestions.length - 1);
+    this.invalidate();
+    this.tui.requestRender(true);
+  }
+
+  private applySelectedSessionSuggestion(shouldSubmit: boolean): void {
+    const selected = this.inlineSessionSuggestions[this.selectedSessionSuggestionIndex];
+
+    if (!selected) {
+      return;
+    }
+
+    if (this.lastEditorValue.startsWith("/session-resume")) {
+      this.lastEditorValue = `/session-resume ${selected.sessionId}`;
+      this.editor.setText(this.lastEditorValue);
+    } else if (this.lastEditorValue.startsWith("/session-fork")) {
+      this.lastEditorValue = `/session-fork ${selected.sessionId}`;
+      this.editor.setText(this.lastEditorValue);
+    }
+
+    this.inlineSessionSuggestions = [];
+    this.selectedSessionSuggestionIndex = 0;
+    this.invalidate();
+    this.tui.requestRender(true);
+
+    if (shouldSubmit) {
+      const submitValue = this.lastEditorValue;
+      this.onSubmit(submitValue);
+      this.editor.setText("");
+      this.lastEditorValue = "";
+    }
   }
 
   private startShimmer(): void {
@@ -611,21 +843,11 @@ function createWorkbenchCommands(
       name: "session-resume",
       argumentHint: "<session-id-or-path>",
       description: "恢复指定 session id 或路径对应的会话，支持补全最近会话",
-      getArgumentCompletions: (query: string) =>
-        buildSessionArgumentCompletions({
-          query,
-          getSessionSuggestions,
-        }),
     },
     {
       name: "session-fork",
       argumentHint: "[session-id-or-path]",
       description: "从当前会话或指定会话创建分支会话，支持补全最近会话",
-      getArgumentCompletions: (query: string) =>
-        buildSessionArgumentCompletions({
-          query,
-          getSessionSuggestions,
-        }),
     },
     {
       name: "docs-goal-new",
@@ -654,33 +876,6 @@ function createWorkbenchCommands(
   ];
 }
 
-async function buildSessionArgumentCompletions(input: {
-  query: string;
-  getSessionSuggestions: (query: string) => Promise<RuntimeSessionListItem[]>;
-}): Promise<Array<{ value: string; label: string; description?: string }>> {
-  const sessions = await input.getSessionSuggestions(input.query);
-
-  return sessions.map((session) => ({
-    value: session.sessionId,
-    label: session.sessionName ? `${session.sessionName} (${session.sessionId.slice(0, 8)})` : session.sessionId,
-    description: buildSessionSuggestionDescription(session),
-  }));
-}
-
-function buildSessionSuggestionDescription(session: RuntimeSessionListItem): string {
-  const parts = [`updated: ${session.updatedAt}`];
-
-  if (session.goalSummary) {
-    parts.push(`goal: ${session.goalSummary}`);
-  }
-
-  if (session.isCurrent) {
-    parts.unshift("current");
-  }
-
-  return parts.join(" | ");
-}
-
 const EDITOR_THEME = {
   borderColor: (text: string): string => text,
   selectList: {
@@ -707,3 +902,162 @@ function toMessagePrefix(type: string, actorLabel?: string): string {
 
   return "S";
 }
+
+function formatMessageLabel(type: string, actorLabel?: string): string {
+  const prefix = toMessagePrefix(type, actorLabel);
+  const foreground = resolveMessageLabelForeground(type, actorLabel);
+
+  return `${foreground}${prefix}${ANSI_RESET}`;
+}
+
+function resolveMessageLabelForeground(type: string, actorLabel?: string): string {
+  if (type.startsWith("user")) {
+    return USER_LABEL_FG;
+  }
+
+  if (type.startsWith("assistant")) {
+    if (actorLabel === "Planner") {
+      return PLANNER_LABEL_FG;
+    }
+
+    if (actorLabel === "Reviewer") {
+      return REVIEWER_LABEL_FG;
+    }
+
+    return ASSISTANT_LABEL_FG;
+  }
+
+  if (type.startsWith("result")) {
+    return RESULT_LABEL_FG;
+  }
+
+  return SYSTEM_LABEL_FG;
+}
+
+function resolveChatMessageBackground(type: string): string {
+  if (type.startsWith("user")) {
+    return USER_CHAT_BG;
+  }
+
+  if (type.startsWith("assistant")) {
+    return ASSISTANT_CHAT_BG;
+  }
+
+  if (type.startsWith("result")) {
+    return RESULT_CHAT_BG;
+  }
+
+  return SYSTEM_CHAT_BG;
+}
+
+function resolveChatMessageAccent(type: string, actorLabel?: string): string {
+  if (type.startsWith("user")) {
+    return USER_ACCENT;
+  }
+
+  if (type.startsWith("assistant")) {
+    if (actorLabel === "Planner") {
+      return PLANNER_ACCENT;
+    }
+
+    if (actorLabel === "Reviewer") {
+      return REVIEWER_ACCENT;
+    }
+
+    return ASSISTANT_ACCENT;
+  }
+
+  if (type.startsWith("result")) {
+    return RESULT_ACCENT;
+  }
+
+  return SYSTEM_ACCENT;
+}
+
+function applyBlockBackground(text: string, width: number, background: string, accent: string): string {
+  const safeWidth = Math.max(3, width);
+  const contentWidth = Math.max(1, safeWidth - 2);
+  const padded = truncateToWidth(text, contentWidth, "...", true).padEnd(contentWidth, " ");
+  const accentBar = `${accent}▌${ANSI_RESET}`;
+
+  return `${background}${accentBar}${padded} ${ANSI_RESET}`;
+}
+
+function parseSessionSuggestionQuery(value: string): string | null {
+  if (value === "/session-resume" || value === "/session-fork") {
+    return "";
+  }
+
+  if (value.startsWith("/session-resume ")) {
+    return value.slice("/session-resume ".length);
+  }
+
+  if (value.startsWith("/session-fork ")) {
+    return value.slice("/session-fork ".length);
+  }
+
+  return null;
+}
+
+function normalizeSingleLineText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function resolveSessionSuggestionDetail(session: RuntimeSessionListItem): string {
+  if (!session.goalSummary) {
+    return "";
+  }
+
+  const normalizedGoal = normalizeSingleLineText(session.goalSummary);
+  const normalizedSessionName = session.sessionName
+    ? normalizeSingleLineText(session.sessionName)
+    : "";
+
+  if (!normalizedGoal) {
+    return "";
+  }
+
+  if (!normalizedSessionName) {
+    return normalizedGoal;
+  }
+
+  if (
+    normalizedGoal === normalizedSessionName
+    || normalizedGoal.startsWith(normalizedSessionName)
+    || normalizedSessionName.startsWith(normalizedGoal)
+  ) {
+    return "";
+  }
+
+  return normalizedGoal;
+}
+
+function applyInlineMarkdownHighlights(text: string): string {
+  return text
+    .replace(/^>\s?(.*)$/gm, (_match, content: string) => {
+      return `${MARKDOWN_QUOTE_PREFIX_FG}> ${MARKDOWN_QUOTE_FG}${content}${ANSI_RESET}`;
+    })
+    .replace(/\*\*(.+?)\*\*/g, (_match, content: string) => {
+      return `${MARKDOWN_BOLD_FG}${content}${ANSI_RESET}`;
+    })
+    .replace(/`([^`]+)`/g, (_match, content: string) => {
+      return `${MARKDOWN_CODE_FG}${content}${ANSI_RESET}`;
+    });
+}
+
+const WORKBENCH_MARKDOWN_THEME = {
+  heading: (text: string): string => `${MARKDOWN_BOLD_FG}${text}${ANSI_RESET}`,
+  link: (text: string): string => `${PLANNER_LABEL_FG}${text}${ANSI_RESET}`,
+  linkUrl: (text: string): string => `${SYSTEM_LABEL_FG}${text}${ANSI_RESET}`,
+  code: (text: string): string => `${MARKDOWN_CODE_FG}${text}${ANSI_RESET}`,
+  codeBlock: (text: string): string => `${MARKDOWN_CODE_FG}${text}${ANSI_RESET}`,
+  codeBlockBorder: (text: string): string => `${SYSTEM_LABEL_FG}${text}${ANSI_RESET}`,
+  quote: (text: string): string => `${MARKDOWN_QUOTE_FG}${text}${ANSI_RESET}`,
+  quoteBorder: (text: string): string => `${MARKDOWN_QUOTE_PREFIX_FG}${text}${ANSI_RESET}`,
+  hr: (text: string): string => `${SYSTEM_LABEL_FG}${text}${ANSI_RESET}`,
+  listBullet: (text: string): string => `${PLANNER_LABEL_FG}${text}${ANSI_RESET}`,
+  bold: (text: string): string => `${MARKDOWN_BOLD_FG}${text}${ANSI_RESET}`,
+  italic: (text: string): string => `${REVIEWER_LABEL_FG}${text}${ANSI_RESET}`,
+  strikethrough: (text: string): string => `${SYSTEM_LABEL_FG}${text}${ANSI_RESET}`,
+  underline: (text: string): string => `${ASSISTANT_LABEL_FG}${text}${ANSI_RESET}`,
+};
