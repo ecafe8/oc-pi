@@ -613,7 +613,7 @@ async function handleWorkbenchCommand(input: {
       const resumed = await input.sessionContext.sessionStore.resumeSession(input.input.argumentText.trim())
 
       return {
-        state: appendSystemMessage(resumed.workbenchState, `Resumed session: ${resumed.workbenchState.session.sessionId ?? 'unknown'}`),
+        state: resumed.workbenchState,
         latestRun: resumed.latestRun,
       }
     }

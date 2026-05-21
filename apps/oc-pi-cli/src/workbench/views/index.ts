@@ -375,7 +375,7 @@ export class WorkbenchRootView implements Component, Focusable {
       const right = visibleInfoLines[index] ?? "";
 
       bodyLines.push(
-        fitRenderedLine(
+        fitRenderedLineSilently(
           `${padRenderedLine(left, chatWidth)}${" ".repeat(dividerWidth)}${padRenderedLine(right, infoWidth)}`,
           safeWidth,
         ),
@@ -420,6 +420,7 @@ export class WorkbenchRootView implements Component, Focusable {
 
   private renderChatLines(width: number, view: ReturnType<typeof presentWorkbenchState>): string[] {
     const lines = [this.decoratePaneTitle("Chat", "chat", width)];
+    const contentWidth = Math.max(1, width - 2);
 
     if (view.chatPane.messages.length === 0) {
       lines.push(...wrapTextWithAnsi("A: 请输入自然语言开始聊天；输入 / 可查看命令补全。", width));
@@ -433,12 +434,15 @@ export class WorkbenchRootView implements Component, Focusable {
 
       if (message.type.startsWith("assistant")) {
         this.assistantMarkdown.setText(message.summary);
-        const markdownLines = this.assistantMarkdown.render(Math.max(1, width - 2));
+        const markdownLines = this.assistantMarkdown.render(contentWidth);
 
         lines.push(
-          ...markdownLines.map((line, index) => {
+          ...markdownLines.flatMap((line, index) => {
             const content = index === 0 ? `${label}: ${line}` : `  ${line}`;
-            return applyBlockBackground(content, width, background, accent);
+
+            return wrapTextWithAnsi(content, contentWidth).map((wrappedLine) =>
+              applyBlockBackground(wrappedLine, width, background, accent),
+            );
           }),
         );
 
@@ -448,7 +452,7 @@ export class WorkbenchRootView implements Component, Focusable {
       const content = `${label}: ${applyInlineMarkdownHighlights(message.summary)}`;
 
       lines.push(
-        ...wrapTextWithAnsi(content, width).map((line) =>
+        ...wrapTextWithAnsi(content, contentWidth).map((line) =>
           applyBlockBackground(line, width, background, accent),
         ),
       );
@@ -1040,10 +1044,10 @@ function resolveChatMessageAccent(type: string, actorLabel?: string): string {
 function applyBlockBackground(text: string, width: number, background: string, accent: string): string {
   const safeWidth = Math.max(3, width);
   const contentWidth = Math.max(1, safeWidth - 2);
-  const padded = truncateToWidth(text, contentWidth, "...", true).padEnd(contentWidth, " ");
+  const padded = truncateToWidth(text, contentWidth, "", true).padEnd(contentWidth, " ");
   const accentBar = `${accent}▌${ANSI_RESET}`;
 
-  return fitRenderedLine(`${background}${accentBar}${padded} ${ANSI_RESET}`, safeWidth);
+  return fitRenderedLine(withPersistentBackground(`${accentBar}${padded} `, background), safeWidth);
 }
 
 function parseSessionSuggestionQuery(value: string): string | null {
@@ -1071,11 +1075,23 @@ function fitRenderedLine(line: string, width: number): string {
     return line;
   }
 
-  return truncateToWidth(line, width, "...", true);
+  return truncateToWidth(line, width, "", true);
+}
+
+function fitRenderedLineSilently(line: string, width: number): string {
+  if (visibleWidth(line) <= width) {
+    return line;
+  }
+
+  return truncateToWidth(line, width, "", true);
+}
+
+function withPersistentBackground(text: string, background: string): string {
+  return `${background}${text.replaceAll(ANSI_RESET, `${ANSI_RESET}${background}`)}${ANSI_RESET}`;
 }
 
 function padRenderedLine(line: string, width: number): string {
-  const fitted = fitRenderedLine(line, width);
+  const fitted = fitRenderedLineSilently(line, width);
   const paddingWidth = Math.max(0, width - visibleWidth(fitted));
 
   return `${fitted}${" ".repeat(paddingWidth)}`;
@@ -1088,16 +1104,18 @@ function renderInfoCard(width: number, title: string, items: InfoCardItem[]): st
   const titleText = truncateToWidth(title, contentWidth, "...", true);
 
   lines.push(
-    fitRenderedLine(
-      `${INFO_CARD_SECTION_BG}${INFO_CARD_BORDER_FG} ${INFO_CARD_TITLE_FG}${padRenderedLine(titleText, contentWidth)}${ANSI_RESET}`,
-      safeWidth,
-    ),
+    fitRenderedLine(withPersistentBackground(
+      `${INFO_CARD_BORDER_FG} ${INFO_CARD_TITLE_FG}${padRenderedLine(titleText, contentWidth)}`,
+      INFO_CARD_SECTION_BG,
+    ), safeWidth),
   );
 
   for (const item of items) {
+    const plainPrefix = `${item.label}: `;
     const prefix = `${INFO_CARD_LABEL_FG}${item.label}${ANSI_RESET}${INFO_CARD_MUTED_FG}: ${ANSI_RESET}`;
     const valueColor = resolveInfoCardTone(item.tone);
-    const wrappedLines = wrapTextWithAnsi(item.value, Math.max(1, contentWidth - Math.min(18, item.label.length + 2)));
+    const continuationPrefix = " ".repeat(Math.min(contentWidth, visibleWidth(plainPrefix)));
+    const wrappedLines = wrapTextWithAnsi(item.value, Math.max(1, contentWidth - visibleWidth(plainPrefix)));
 
     if (wrappedLines.length === 0) {
       lines.push(renderInfoCardBodyLine(prefix, `${valueColor}-${ANSI_RESET}`, safeWidth));
@@ -1107,7 +1125,7 @@ function renderInfoCard(width: number, title: string, items: InfoCardItem[]): st
     lines.push(renderInfoCardBodyLine(prefix, `${valueColor}${wrappedLines[0]}${ANSI_RESET}`, safeWidth));
 
     for (const continuedLine of wrappedLines.slice(1)) {
-      lines.push(renderInfoCardBodyLine("  ", `${valueColor}${continuedLine}${ANSI_RESET}`, safeWidth));
+      lines.push(renderInfoCardBodyLine(continuationPrefix, `${valueColor}${continuedLine}${ANSI_RESET}`, safeWidth));
     }
   }
 
@@ -1119,10 +1137,7 @@ function renderInfoCardBodyLine(prefix: string, value: string, width: number): s
   const contentWidth = Math.max(1, safeWidth - 2);
   const line = padRenderedLine(`${prefix}${value}`, contentWidth);
 
-  return fitRenderedLine(
-    `${INFO_CARD_BG}${INFO_CARD_BORDER_FG} ${line}${ANSI_RESET}`,
-    safeWidth,
-  );
+  return fitRenderedLine(withPersistentBackground(`${INFO_CARD_BORDER_FG} ${line}`, INFO_CARD_BG), safeWidth);
 }
 
 function resolveInfoCardTone(tone: InfoCardTone): string {
