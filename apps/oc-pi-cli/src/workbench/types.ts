@@ -77,6 +77,9 @@ export interface WorkbenchExecutionState {
   pendingAssistantMessage?: string;
   thinkingText?: string;
   thinkingCollapsed: boolean;
+  liveDraftTitle?: string;
+  liveDraftText?: string;
+  liveDraftCollapsed: boolean;
 }
 
 export interface WorkbenchStatusBarState {

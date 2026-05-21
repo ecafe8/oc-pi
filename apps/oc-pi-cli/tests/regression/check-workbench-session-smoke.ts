@@ -69,6 +69,10 @@ async function runWorkbenchSessionSmokeTest(input: {
     'Expected /session-new to create and switch to a current session.',
   )
   assert(
+    createdView.presented.chatPane.latestSummary?.includes('Switched to new session:') ?? false,
+    'Expected /session-new to append a timeline confirmation message.',
+  )
+  assert(
     createdView.presented.topBar.sessionName === 'Smoke Test Session',
     'Expected top bar to show the newly created session name.',
   )
@@ -103,6 +107,10 @@ async function runWorkbenchSessionSmokeTest(input: {
     'Expected /session-fork to switch the current session pointer.',
   )
   assert(
+    forkedView.presented.chatPane.latestSummary?.includes('Forked session:') ?? false,
+    'Expected /session-fork to append a timeline confirmation message.',
+  )
+  assert(
     forkedView.presented.topBar.sessionId === forkedSessionId,
     'Expected top bar to refresh to the forked session id.',
   )
@@ -124,6 +132,10 @@ async function runWorkbenchSessionSmokeTest(input: {
   assert(
     resumedView.state.session.sessionId === createdSessionId,
     'Expected /session-resume to switch back to the requested session.',
+  )
+  assert(
+    resumedView.presented.chatPane.latestSummary?.includes('Resumed session:') ?? false,
+    'Expected /session-resume to append a timeline confirmation message.',
   )
   assert(
     resumedView.presented.topBar.sessionName === 'Smoke Test Session',

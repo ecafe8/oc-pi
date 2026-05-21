@@ -85,6 +85,10 @@ export async function startWorkbench(options: StartWorkbenchOptions): Promise<vo
     tui,
     workspacePath: options.workspacePath,
     state,
+    getSessionSuggestions: async (query) => filterSessionSuggestions({
+      query,
+      sessions: await sessionStore.listSessions(),
+    }),
     onSubmit: async (value) => {
       const trimmed = value.trim()
 
@@ -376,16 +380,20 @@ async function handleWorkbenchCommand(input: {
       }
 
       const artifactMode: ArtifactMode = confirmed.shouldWrite ? 'write' : 'preview'
+      let progressiveState = confirmed.state
       const result = await runGoalToDocsMvp({
         goal: confirmed.goal,
         cliRoot: input.cliRoot,
         artifactMode,
         initialWorkbenchState: confirmed.state,
         skipInitialGoalTimeline: true,
+        onWorkbenchStateChange: (nextState) => {
+          progressiveState = nextState
+        },
       })
 
       return {
-        state: result.workbenchState,
+        state: result.workbenchState ?? progressiveState,
         latestRun: result.run,
       }
     }
@@ -444,7 +452,7 @@ async function handleWorkbenchCommand(input: {
       return {
         state: appendSystemMessage(
           input.state,
-          'Commands: /session-new [name] 创建并切换新会话； /session-list 列出当前项目会话； /session-resume <session-id-or-path> 恢复指定会话； /session-fork [session-id-or-path] 从会话创建分支； /docs-goal-new 规划新的文档目标； /docs-plan-run 生成文档执行方案； /docs-plan-retry 重新规划当前方案； /docs-exec-confirm 确认方案并执行写入； /docs-exec-cancel 取消待执行方案； /docs-status-show 查看状态与执行边界； /docs-review-latest 查看最近审查结论； /workbench-help-show 查看命令帮助； /workbench-thinking-toggle 折叠或展开 Thinking 区； /workbench-pane-chat-focus 聚焦聊天区； /workbench-pane-thinking-focus 聚焦 Thinking 区； /workbench-pane-info-focus 聚焦信息区',
+          'Commands: /session-new [name] 创建并切换新会话，可直接输入会话名； /session-list 列出当前项目会话； /session-resume <session-id-or-path> 恢复指定会话，支持补全最近会话； /session-fork [session-id-or-path] 从会话创建分支，支持补全最近会话； /docs-goal-new [goal] 规划新的文档目标，支持直接输入自然语言目标； /docs-plan-run [intent] 生成文档执行方案，支持补充本次规划约束； /docs-plan-retry [intent] 重新规划当前方案，支持补充修正规则； /docs-exec-confirm 确认方案并执行写入； /docs-exec-cancel 取消待执行方案； /docs-status-show 查看状态与执行边界； /docs-review-latest 查看最近审查结论； /workbench-help-show 查看命令帮助； /workbench-thinking-toggle 折叠或展开 Thinking 区； /workbench-pane-chat-focus 聚焦聊天区； /workbench-pane-thinking-focus 聚焦 Thinking 区； /workbench-pane-info-focus 聚焦信息区',
         ),
         latestRun: input.latestRun,
       }
@@ -459,13 +467,30 @@ async function handleWorkbenchCommand(input: {
       }
 
     case '/docs-goal-new':
+      if (input.input.argumentText?.trim()) {
+        const next = handleGoalNew({
+          state: input.state,
+          goal: input.input.argumentText.trim(),
+        })
+
+        return {
+          state: appendSystemMessage(next.state, '已接收新的 docs goal。可继续用 /docs-plan-run 生成执行方案。'),
+          latestRun: input.latestRun,
+        }
+      }
+
       return {
         state: appendSystemMessage(input.state, '已准备新的 docs goal。接下来请用自然语言描述目标，再用 /docs-plan-run 生成执行方案。'),
         latestRun: input.latestRun,
       }
 
     case '/docs-plan-run': {
-      if (!input.state.session.currentGoal) {
+      const planningGoal = buildPlanningGoalInput({
+        currentGoal: input.state.session.currentGoal,
+        inlineIntent: input.input.argumentText,
+      })
+
+      if (!planningGoal) {
         return {
           state: appendSystemMessage(input.state, 'No current goal. 请先输入目标文本。'),
           latestRun: input.latestRun,
@@ -474,13 +499,18 @@ async function handleWorkbenchCommand(input: {
 
       return handleGoalPlanning({
         state: input.state,
-        goal: input.state.session.currentGoal,
+        goal: planningGoal,
         cliRoot: input.cliRoot,
       })
     }
 
     case '/docs-plan-retry': {
-      if (!input.state.session.currentGoal) {
+      const planningGoal = buildPlanningGoalInput({
+        currentGoal: input.state.session.currentGoal,
+        inlineIntent: input.input.argumentText,
+      })
+
+      if (!planningGoal) {
         return {
           state: appendSystemMessage(input.state, 'No current goal to retry.'),
           latestRun: input.latestRun,
@@ -491,7 +521,7 @@ async function handleWorkbenchCommand(input: {
 
       return handleGoalPlanning({
         state: retriedState,
-        goal: input.state.session.currentGoal,
+        goal: planningGoal,
         cliRoot: input.cliRoot,
       })
     }
@@ -738,4 +768,46 @@ function formatSessionListSummary(sessions: RuntimeSessionListItem[]): string {
       return `${session.sessionId}${current}${name} | updated: ${session.updatedAt}${goal}`
     })
     .join(' || ')
+}
+
+function buildPlanningGoalInput(input: {
+  currentGoal?: string
+  inlineIntent?: string
+}): string | undefined {
+  const baseGoal = input.currentGoal?.trim()
+  const inlineIntent = input.inlineIntent?.trim()
+
+  if (!baseGoal) {
+    return inlineIntent || undefined
+  }
+
+  if (!inlineIntent) {
+    return baseGoal
+  }
+
+  return `${baseGoal}\n\n补充约束: ${inlineIntent}`
+}
+
+function filterSessionSuggestions(input: {
+  query: string
+  sessions: RuntimeSessionListItem[]
+}): RuntimeSessionListItem[] {
+  const normalizedQuery = input.query.trim().toLowerCase()
+
+  if (!normalizedQuery) {
+    return input.sessions.slice(0, 8)
+  }
+
+  return input.sessions
+    .filter((session) => {
+      return [
+        session.sessionId,
+        session.sessionFile,
+        session.sessionName,
+        session.goalSummary,
+      ]
+        .filter((value): value is string => Boolean(value))
+        .some((value) => value.toLowerCase().includes(normalizedQuery))
+    })
+    .slice(0, 8)
 }

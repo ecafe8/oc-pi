@@ -49,6 +49,8 @@ export interface PresentedWorkbenchState {
     execution: {
       currentAction: string
       latestAction: string
+      liveDraftTitle?: string
+      liveDraftText?: string
       touchedFiles: string[]
       lastExecutionStatus: string
       resolvedSlotId: string
@@ -120,6 +122,8 @@ export function presentWorkbenchState(
       execution: {
         currentAction: state.execution.currentAction,
         latestAction: state.execution.latestAction,
+        liveDraftTitle: state.execution.liveDraftTitle,
+        liveDraftText: state.execution.liveDraftText,
         touchedFiles: state.execution.touchedFiles,
         lastExecutionStatus: state.inspector.lastExecutionStatus,
         resolvedSlotId: state.inspector.resolvedSlotId,

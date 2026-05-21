@@ -33,6 +33,7 @@ import type {
   ResolvedStageTarget,
 } from '@/planning/goal-to-docs/types.js'
 import {
+  applyGoalToDocsProgressToWorkbench,
   applyReviewToWorkbench,
   handleGoalNew,
   syncGoalToDocsRunToWorkbench,
@@ -52,6 +53,7 @@ export interface RunGoalToDocsMvpInput {
   confirmRealWrite?: (request: RealWriteConfirmationRequest) => Promise<boolean>
   initialWorkbenchState?: WorkbenchState
   skipInitialGoalTimeline?: boolean
+  onWorkbenchStateChange?: (state: WorkbenchState) => void
 }
 
 export interface RunGoalToDocsMvpResult {
@@ -182,6 +184,9 @@ export async function runGoalToDocsMvp(
       apiKeyCache,
     }),
     confirmRealWrite: input.confirmRealWrite,
+    onProgress: (event) => {
+      goalResult.state = applyProgressToWorkbenchState(goalResult.state, event, input.onWorkbenchStateChange)
+    },
   })
 
   if (!canContinueAfterStage(firstStageResult.stageResult)) {
@@ -272,6 +277,9 @@ export async function runGoalToDocsMvp(
       apiKeyCache,
     }),
     confirmRealWrite: input.confirmRealWrite,
+    onProgress: (event) => {
+      goalResult.state = applyProgressToWorkbenchState(goalResult.state, event, input.onWorkbenchStateChange)
+    },
   })
 
   if (!canContinueAfterStage(secondStageResult.stageResult)) {
@@ -374,6 +382,9 @@ export async function runGoalToDocsMvp(
       apiKeyCache,
     }),
     confirmRealWrite: input.confirmRealWrite,
+    onProgress: (event) => {
+      goalResult.state = applyProgressToWorkbenchState(goalResult.state, event, input.onWorkbenchStateChange)
+    },
     additionalArtifacts: [
       {
         slotId: 'mvp-scope',
@@ -477,6 +488,9 @@ export async function runGoalToDocsMvp(
     reviewerRole: fourthStageReviewerRole,
     reviewerApiKey: fourthStageReviewerApiKey,
     confirmRealWrite: input.confirmRealWrite,
+    onProgress: (event) => {
+      goalResult.state = applyProgressToWorkbenchState(goalResult.state, event, input.onWorkbenchStateChange)
+    },
     additionalArtifacts: [
       {
         slotId: 'handoff-next-up',
@@ -539,6 +553,7 @@ interface ExecuteStageInput {
   reviewerRole: typeof DEFAULT_ROLE_CONFIGS[number]
   reviewerApiKey: string
   confirmRealWrite?: (request: RealWriteConfirmationRequest) => Promise<boolean>
+  onProgress?: (event: GoalToDocsProgressEvent) => void
   additionalArtifacts?: Array<{
     slotId: SlotId
     buildPrompt: (input: { primaryArtifactText: string }) => string
@@ -573,9 +588,24 @@ interface ExecuteArtifactInput {
   reviewerApiKey: string
   agentBridge: PiModelAgentBridge
   confirmRealWrite?: (request: RealWriteConfirmationRequest) => Promise<boolean>
+  onProgress?: (event: GoalToDocsProgressEvent) => void
+}
+
+interface GoalToDocsProgressEvent {
+  summary: string
+  currentAction: string
+  latestAction?: string
+  liveDraftTitle?: string
+  liveDraftText?: string
 }
 
 async function executeStage(input: ExecuteStageInput): Promise<ExecuteStageOutput> {
+  input.onProgress?.({
+    summary: `正在思考 ${describeStageLabel(input.stage.stageId)}。`,
+    currentAction: `thinking ${input.stage.stageId}`,
+    latestAction: `preparing ${input.stage.stageId}`,
+  })
+
   const primaryArtifact = await executeArtifact({
     stage: input.stage,
     slotId: input.stage.primaryOutputSlot,
@@ -591,6 +621,7 @@ async function executeStage(input: ExecuteStageInput): Promise<ExecuteStageOutpu
     reviewerApiKey: input.reviewerApiKey,
     agentBridge: input.agentBridge,
     confirmRealWrite: input.confirmRealWrite,
+    onProgress: input.onProgress,
   })
 
   const additionalArtifacts: ArtifactExecutionDetail[] = []
@@ -623,6 +654,7 @@ async function executeStage(input: ExecuteStageInput): Promise<ExecuteStageOutpu
           reviewerApiKey: input.reviewerApiKey,
           agentBridge: input.agentBridge,
           confirmRealWrite: input.confirmRealWrite,
+          onProgress: input.onProgress,
         }),
       )
     }
@@ -708,6 +740,11 @@ async function executeArtifact(input: ExecuteArtifactInput): Promise<ArtifactExe
   const currentSourceText = input.artifactMode === 'write'
     ? await readCurrentSourceText(resolvedArtifactAbsolutePath)
     : null
+  input.onProgress?.({
+    summary: `正在编写 ${describeSlotLabel(input.slotId)}。`,
+    currentAction: `writing ${input.slotId}`,
+    latestAction: `writing ${input.slotId}`,
+  })
   const artifactResponse = await input.agentBridge.prompt({
     cwd: input.cliRoot,
     provider: input.provider,
@@ -723,6 +760,13 @@ async function executeArtifact(input: ExecuteArtifactInput): Promise<ArtifactExe
   const normalizedArtifactText = normalizeArtifactDocument({
     logicalArtifactPath,
     content: artifactResponse.text,
+  })
+  input.onProgress?.({
+    summary: `已生成 ${describeSlotLabel(input.slotId)} 草稿，正在审查。`,
+    currentAction: `reviewing ${input.slotId}`,
+    latestAction: `drafted ${input.slotId}`,
+    liveDraftTitle: describeSlotLabel(input.slotId),
+    liveDraftText: normalizedArtifactText,
   })
   const validation = validateArtifactDocument({
     logicalArtifactPath,
@@ -1823,6 +1867,52 @@ function buildTimelineSummary(
   }
 
   return `Previewed ${stageResult.review.artifactSlotId} at ${stageResult.stageResult.logicalArtifactPath}`
+}
+
+function applyProgressToWorkbenchState(
+  state: WorkbenchState,
+  event: GoalToDocsProgressEvent,
+  onWorkbenchStateChange?: (state: WorkbenchState) => void,
+): WorkbenchState {
+  const nextState = applyGoalToDocsProgressToWorkbench(state, event)
+
+  onWorkbenchStateChange?.(nextState)
+
+  return nextState
+}
+
+function describeStageLabel(stageId: GoalToDocsStageContract['stageId']): string {
+  switch (stageId) {
+    case 'goal-framing':
+      return '产品愿景'
+    case 'capability-breakdown':
+      return '产品能力大纲'
+    case 'feature-planning':
+      return '功能规划'
+    case 'handoff-summary':
+      return '交接摘要'
+    default:
+      return stageId
+  }
+}
+
+function describeSlotLabel(slotId: SlotId): string {
+  switch (slotId) {
+    case 'product-goal':
+      return '产品愿景文档'
+    case 'capability-map':
+      return '产品能力大纲文档'
+    case 'feature-plan':
+      return '功能规划文档'
+    case 'mvp-scope':
+      return 'MVP 范围文档'
+    case 'handoff-summary':
+      return '交接摘要文档'
+    case 'handoff-next-up':
+      return '下一步指引文档'
+    default:
+      return slotId
+  }
 }
 
 function finalizeWorkbenchState(input: {

@@ -1,9 +1,11 @@
 import type { GoalToDocsRunRecord } from '@/planning/goal-to-docs/types.js'
 import {
   addTimelineItem,
+  appendWorkbenchSystemStatus,
   finishWorkbenchAssistantReply,
   clearWorkbenchPendingExecution,
   setWorkbenchGoal,
+  setWorkbenchExecutionProgress,
   setWorkbenchPlanDraft,
   setWorkbenchReviewState,
   startWorkbenchAssistantReply,
@@ -249,4 +251,26 @@ export function applyReviewToWorkbench(
   },
 ): WorkbenchState {
   return setWorkbenchReviewState(state, input)
+}
+
+export function applyGoalToDocsProgressToWorkbench(
+  state: WorkbenchState,
+  input: {
+    summary: string
+    currentAction: string
+    latestAction?: string
+    liveDraftTitle?: string
+    liveDraftText?: string
+  },
+): WorkbenchState {
+  return appendWorkbenchSystemStatus(
+    setWorkbenchExecutionProgress(state, {
+      currentAction: input.currentAction,
+      latestAction: input.latestAction,
+      liveDraftTitle: input.liveDraftTitle,
+      liveDraftText: input.liveDraftText,
+      runtimeStatus: 'running',
+    }),
+    input.summary,
+  )
 }

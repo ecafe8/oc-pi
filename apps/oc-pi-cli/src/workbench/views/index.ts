@@ -12,11 +12,13 @@ import {
 } from "@earendil-works/pi-tui";
 
 import { presentWorkbenchState } from "@/workbench/presenters/present-workbench-state.js";
+import type { RuntimeSessionListItem } from "@/runtime/session-store.js";
 import type { WorkbenchState } from "@/workbench/types.js";
 
 const MIN_INFO_PANE_WIDTH = 28;
 const INFO_PANE_RATIO = 0.34;
-type ScrollPane = "chat" | "thinking" | "info";
+const LIVE_DRAFT_MAX_HEIGHT = 6;
+type ScrollPane = "chat" | "thinking" | "draft" | "info";
 
 interface RenderLayoutMetrics {
   bodyStartRow: number;
@@ -30,6 +32,7 @@ export interface WorkbenchRootViewOptions {
   tui: TUI;
   workspacePath: string;
   state: WorkbenchState;
+  getSessionSuggestions: (query: string) => Promise<RuntimeSessionListItem[]>;
   onSubmit: (value: string) => void;
 }
 
@@ -44,6 +47,7 @@ export class WorkbenchRootView implements Component, Focusable {
   private state: WorkbenchState;
   private chatScrollOffset = 0;
   private thinkingScrollOffset = 0;
+  private draftScrollOffset = 0;
   private infoScrollOffset = 0;
   private autoFollowChat = true;
   private lastChatSignature = "";
@@ -62,7 +66,12 @@ export class WorkbenchRootView implements Component, Focusable {
       paddingX: 0,
       autocompleteMaxVisible: 6,
     });
-    this.editor.setAutocompleteProvider(new CombinedAutocompleteProvider(WORKBENCH_COMMANDS, options.workspacePath));
+    this.editor.setAutocompleteProvider(
+      new CombinedAutocompleteProvider(
+        createWorkbenchCommands(options.getSessionSuggestions),
+        options.workspacePath,
+      ),
+    );
     this.editor.onSubmit = (value) => {
       options.onSubmit(value);
       this.editor.setText("");
@@ -103,6 +112,11 @@ export class WorkbenchRootView implements Component, Focusable {
 
     if (matchesKey(data, Key.ctrl("3"))) {
       this.activeScrollPane = "info";
+      return;
+    }
+
+    if (matchesKey(data, Key.ctrl("4"))) {
+      this.activeScrollPane = "draft";
       return;
     }
 
@@ -194,14 +208,16 @@ export class WorkbenchRootView implements Component, Focusable {
     const composerLabel = truncateToWidth(
       this.inputLocked
         ? `> composer: AI 处理中 | 输入已暂停${this.renderCancelHint()} | active: ${this.activeScrollPane}`
-        : `> composer: 自然语言默认聊天 | 输入 / 查看命令补全 | ctrl+1 chat | ctrl+2 thinking | ctrl+3 info | active: ${this.activeScrollPane}`,
+        : `> composer: 自然语言默认聊天 | 输入 / 查看命令补全 | ctrl+1 chat | ctrl+2 thinking | ctrl+3 info | ctrl+4 draft | active: ${this.activeScrollPane}`,
       safeWidth,
       "...",
       true,
     );
+    const liveDraftLines = this.renderLiveDraftLines(safeWidth, view);
     const composerLines = this.renderComposerLines(safeWidth);
     const bodyViewportHeight = this.resolveBodyViewportHeight({
       thinkingLines,
+      liveDraftLines,
       composerLines,
     });
 
@@ -240,6 +256,7 @@ export class WorkbenchRootView implements Component, Focusable {
       ...bodyLines,
       "".padEnd(safeWidth, "-"),
       ...thinkingLines,
+      ...liveDraftLines,
       composerLabel,
       ...composerLines,
     ];
@@ -285,6 +302,21 @@ export class WorkbenchRootView implements Component, Focusable {
     }
 
     return lines;
+  }
+
+  private renderLiveDraftLines(width: number, view: ReturnType<typeof presentWorkbenchState>): string[] {
+    if (!view.rightPane.execution.liveDraftText?.trim()) {
+      return [];
+    }
+
+    const title = view.rightPane.execution.liveDraftTitle ?? "Live Draft";
+    const allLines = [
+      this.decoratePaneTitle(`${title} | live draft`, "draft", width),
+      ...wrapTextWithAnsi(view.rightPane.execution.liveDraftText, width),
+    ];
+    const visibleLines = this.slicePaneLines("draft", allLines, LIVE_DRAFT_MAX_HEIGHT);
+
+    return [...visibleLines, "".padEnd(width, ".")];
   }
 
   private renderInfoLines(width: number, view: ReturnType<typeof presentWorkbenchState>): string[] {
@@ -371,12 +403,22 @@ export class WorkbenchRootView implements Component, Focusable {
       this.thinkingScrollOffset = Math.min(this.thinkingScrollOffset, maxOffset);
     }
 
+    if (pane === "draft") {
+      this.draftScrollOffset = Math.min(this.draftScrollOffset, maxOffset);
+    }
+
     if (pane === "info") {
       this.infoScrollOffset = Math.min(this.infoScrollOffset, maxOffset);
     }
 
     const offset =
-      pane === "chat" ? this.chatScrollOffset : pane === "thinking" ? this.thinkingScrollOffset : this.infoScrollOffset;
+      pane === "chat"
+        ? this.chatScrollOffset
+        : pane === "thinking"
+          ? this.thinkingScrollOffset
+          : pane === "draft"
+            ? this.draftScrollOffset
+            : this.infoScrollOffset;
 
     return lines.slice(offset, offset + visibleHeight);
   }
@@ -462,6 +504,11 @@ export class WorkbenchRootView implements Component, Focusable {
       return;
     }
 
+    if (pane === "draft") {
+      this.draftScrollOffset = Math.max(0, this.draftScrollOffset + delta);
+      return;
+    }
+
     this.infoScrollOffset = Math.max(0, this.infoScrollOffset + delta);
   }
 
@@ -471,9 +518,9 @@ export class WorkbenchRootView implements Component, Focusable {
     return truncateToWidth(`${label}${suffix}`, width, "...", true);
   }
 
-  private resolveBodyViewportHeight(input: { thinkingLines: string[]; composerLines: string[] }): number {
+  private resolveBodyViewportHeight(input: { thinkingLines: string[]; liveDraftLines: string[]; composerLines: string[] }): number {
     const terminalRows = Math.max(12, this.tui.terminal.rows);
-    const reservedRows = 2 + input.thinkingLines.length + 1 + input.composerLines.length;
+    const reservedRows = 2 + input.thinkingLines.length + input.liveDraftLines.length + 1 + input.composerLines.length;
 
     return Math.max(8, terminalRows - reservedRows);
   }
@@ -550,24 +597,89 @@ export class WorkbenchRootView implements Component, Focusable {
   }
 }
 
-const WORKBENCH_COMMANDS: SlashCommand[] = [
-  { name: "session-new", description: "创建并切换到新会话，可选填写会话名" },
-  { name: "session-list", description: "列出当前项目可恢复会话与最近目标摘要" },
-  { name: "session-resume", description: "恢复指定 session id 或路径对应的会话" },
-  { name: "session-fork", description: "从当前会话或指定会话创建分支会话" },
-  { name: "docs-goal-new", description: "规划新的文档目标，准备输入或替换当前 goal" },
-  { name: "docs-plan-run", description: "为当前文档目标生成 AI 执行方案，不直接写文件" },
-  { name: "docs-plan-retry", description: "重新规划当前文档方案，覆盖已有计划草稿" },
-  { name: "docs-exec-confirm", description: "确认方案并执行，按运行阶段写入 sandbox 或文档" },
-  { name: "docs-exec-cancel", description: "取消待执行的文档方案，不回滚已写入文件" },
-  { name: "docs-status-show", description: "查看当前文档工作流状态与执行边界" },
-  { name: "docs-review-latest", description: "查看最近一次文档审查结论与摘要" },
-  { name: "workbench-help-show", description: "查看工作台命令与用途说明" },
-  { name: "workbench-thinking-toggle", description: "折叠或展开 Thinking 区，不影响执行结果" },
-  { name: "workbench-pane-chat-focus", description: "将滚动焦点切到聊天区，便于查看对话流" },
-  { name: "workbench-pane-thinking-focus", description: "将滚动焦点切到 Thinking 区，便于查看思考流" },
-  { name: "workbench-pane-info-focus", description: "将滚动焦点切到右侧信息区，便于查看计划与执行信息" },
-];
+function createWorkbenchCommands(
+  getSessionSuggestions: (query: string) => Promise<RuntimeSessionListItem[]>,
+): SlashCommand[] {
+  return [
+    {
+      name: "session-new",
+      argumentHint: "<session-name>",
+      description: "创建并切换到新会话，可直接补充自然语言会话名",
+    },
+    { name: "session-list", description: "列出当前项目可恢复会话与最近目标摘要" },
+    {
+      name: "session-resume",
+      argumentHint: "<session-id-or-path>",
+      description: "恢复指定 session id 或路径对应的会话，支持补全最近会话",
+      getArgumentCompletions: (query: string) => buildSessionArgumentCompletions({
+        query,
+        getSessionSuggestions,
+      }),
+    },
+    {
+      name: "session-fork",
+      argumentHint: "[session-id-or-path]",
+      description: "从当前会话或指定会话创建分支会话，支持补全最近会话",
+      getArgumentCompletions: (query: string) => buildSessionArgumentCompletions({
+        query,
+        getSessionSuggestions,
+      }),
+    },
+    {
+      name: "docs-goal-new",
+      argumentHint: "<goal-description>",
+      description: "规划新的文档目标，可直接在命令后追加自然语言目标",
+    },
+    {
+      name: "docs-plan-run",
+      argumentHint: "[extra-intent]",
+      description: "为当前文档目标生成 AI 执行方案，可直接补充额外约束",
+    },
+    {
+      name: "docs-plan-retry",
+      argumentHint: "[retry-intent]",
+      description: "重新规划当前文档方案，可直接补充修正规则或额外要求",
+    },
+    { name: "docs-exec-confirm", description: "确认方案并执行，按运行阶段写入 sandbox 或文档" },
+    { name: "docs-exec-cancel", description: "取消待执行的文档方案，不回滚已写入文件" },
+    { name: "docs-status-show", description: "查看当前文档工作流状态与执行边界" },
+    { name: "docs-review-latest", description: "查看最近一次文档审查结论与摘要" },
+    { name: "workbench-help-show", description: "查看工作台命令与用途说明" },
+    { name: "workbench-thinking-toggle", description: "折叠或展开 Thinking 区，不影响执行结果" },
+    { name: "workbench-pane-chat-focus", description: "将滚动焦点切到聊天区，便于查看对话流" },
+    { name: "workbench-pane-thinking-focus", description: "将滚动焦点切到 Thinking 区，便于查看思考流" },
+    { name: "workbench-pane-info-focus", description: "将滚动焦点切到右侧信息区，便于查看计划与执行信息" },
+  ];
+}
+
+async function buildSessionArgumentCompletions(input: {
+  query: string;
+  getSessionSuggestions: (query: string) => Promise<RuntimeSessionListItem[]>;
+}): Promise<Array<{ value: string; label: string; description?: string }>> {
+  const sessions = await input.getSessionSuggestions(input.query);
+
+  return sessions.map((session) => ({
+    value: session.sessionId,
+    label: session.sessionName
+      ? `${session.sessionName} (${session.sessionId.slice(0, 8)})`
+      : session.sessionId,
+    description: buildSessionSuggestionDescription(session),
+  }));
+}
+
+function buildSessionSuggestionDescription(session: RuntimeSessionListItem): string {
+  const parts = [`updated: ${session.updatedAt}`];
+
+  if (session.goalSummary) {
+    parts.push(`goal: ${session.goalSummary}`);
+  }
+
+  if (session.isCurrent) {
+    parts.unshift("current");
+  }
+
+  return parts.join(" | ");
+}
 
 const EDITOR_THEME = {
   borderColor: (text: string): string => text,

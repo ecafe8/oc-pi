@@ -84,6 +84,7 @@ export function createWorkbenchExecutionState(): WorkbenchExecutionState {
     executionBoundary: 'preview',
     requestedArtifactMode: 'preview',
     thinkingCollapsed: true,
+    liveDraftCollapsed: false,
   }
 }
 
@@ -199,6 +200,9 @@ export function setWorkbenchPlanDraft(
       pendingAssistantMessage: undefined,
       thinkingText: undefined,
       thinkingCollapsed: state.execution.thinkingCollapsed,
+      liveDraftTitle: undefined,
+      liveDraftText: undefined,
+      liveDraftCollapsed: state.execution.liveDraftCollapsed,
     },
   }
 }
@@ -214,6 +218,9 @@ export function clearWorkbenchPendingExecution(state: WorkbenchState): Workbench
       pendingAssistantMessage: undefined,
       thinkingText: undefined,
       thinkingCollapsed: state.execution.thinkingCollapsed,
+      liveDraftTitle: undefined,
+      liveDraftText: undefined,
+      liveDraftCollapsed: state.execution.liveDraftCollapsed,
     },
   }
 }
@@ -231,6 +238,9 @@ export function startWorkbenchAssistantReply(
         pendingAssistantMessage: '',
         thinkingText: '',
         thinkingCollapsed: state.execution.thinkingCollapsed,
+        liveDraftTitle: undefined,
+        liveDraftText: undefined,
+        liveDraftCollapsed: state.execution.liveDraftCollapsed,
       },
     },
     {
@@ -284,6 +294,9 @@ export function finishWorkbenchAssistantReply(
       pendingAssistantMessage: undefined,
       thinkingText: undefined,
       thinkingCollapsed: state.execution.thinkingCollapsed,
+      liveDraftTitle: state.execution.liveDraftTitle,
+      liveDraftText: state.execution.liveDraftText,
+      liveDraftCollapsed: state.execution.liveDraftCollapsed,
     },
   }
 }
@@ -343,6 +356,39 @@ export function toggleWorkbenchThinkingCollapsed(state: WorkbenchState): Workben
       thinkingCollapsed: !state.execution.thinkingCollapsed,
     },
   }
+}
+
+export function setWorkbenchExecutionProgress(state: WorkbenchState, input: {
+  currentAction: string
+  latestAction?: string
+  liveDraftTitle?: string
+  liveDraftText?: string
+  runtimeStatus?: RuntimeStatus
+}): WorkbenchState {
+  const nextState = input.runtimeStatus
+    ? setWorkbenchRuntimeStatus(state, input.runtimeStatus)
+    : state
+
+  return {
+    ...nextState,
+    execution: {
+      ...nextState.execution,
+      currentAction: input.currentAction,
+      latestAction: input.latestAction ?? nextState.execution.latestAction,
+      liveDraftTitle: input.liveDraftTitle ?? nextState.execution.liveDraftTitle,
+      liveDraftText: input.liveDraftText ?? nextState.execution.liveDraftText,
+      liveDraftCollapsed: nextState.execution.liveDraftCollapsed,
+    },
+  }
+}
+
+export function appendWorkbenchSystemStatus(state: WorkbenchState, summary: string): WorkbenchState {
+  return addTimelineItem(state, {
+    type: 'system-summary',
+    summary,
+    createdAt: new Date().toISOString(),
+    messageType: 'system-status',
+  })
 }
 
 export function syncWorkbenchSessionFromGoalToDocsRun(state: WorkbenchState, run: GoalToDocsRunRecord): WorkbenchState {
