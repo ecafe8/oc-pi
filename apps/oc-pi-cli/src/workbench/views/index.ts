@@ -10,9 +10,8 @@ import {
   truncateToWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-
-import { presentWorkbenchState } from "@/workbench/presenters/present-workbench-state.js";
 import type { RuntimeSessionListItem } from "@/runtime/session-store.js";
+import { presentWorkbenchState } from "@/workbench/presenters/present-workbench-state.js";
 import type { WorkbenchState } from "@/workbench/types.js";
 
 const MIN_INFO_PANE_WIDTH = 28;
@@ -67,10 +66,7 @@ export class WorkbenchRootView implements Component, Focusable {
       autocompleteMaxVisible: 6,
     });
     this.editor.setAutocompleteProvider(
-      new CombinedAutocompleteProvider(
-        createWorkbenchCommands(options.getSessionSuggestions),
-        options.workspacePath,
-      ),
+      new CombinedAutocompleteProvider(createWorkbenchCommands(options.getSessionSuggestions), options.workspacePath),
     );
     this.editor.onSubmit = (value) => {
       options.onSubmit(value);
@@ -518,7 +514,11 @@ export class WorkbenchRootView implements Component, Focusable {
     return truncateToWidth(`${label}${suffix}`, width, "...", true);
   }
 
-  private resolveBodyViewportHeight(input: { thinkingLines: string[]; liveDraftLines: string[]; composerLines: string[] }): number {
+  private resolveBodyViewportHeight(input: {
+    thinkingLines: string[];
+    liveDraftLines: string[];
+    composerLines: string[];
+  }): number {
     const terminalRows = Math.max(12, this.tui.terminal.rows);
     const reservedRows = 2 + input.thinkingLines.length + input.liveDraftLines.length + 1 + input.composerLines.length;
 
@@ -535,7 +535,7 @@ export class WorkbenchRootView implements Component, Focusable {
 
   private renderLockedComposerLines(width: number): string[] {
     const border = "".padEnd(Math.max(1, width), "─");
-    const message = truncateToWidth(` AI 处理中${this.resolveShimmerSuffix()}}`, width, "...", true);
+    const message = truncateToWidth(` AI 处理中${this.resolveShimmerSuffix()}`, width, "...", true);
 
     return [border, message.padEnd(width, " "), border];
   }
@@ -611,19 +611,21 @@ function createWorkbenchCommands(
       name: "session-resume",
       argumentHint: "<session-id-or-path>",
       description: "恢复指定 session id 或路径对应的会话，支持补全最近会话",
-      getArgumentCompletions: (query: string) => buildSessionArgumentCompletions({
-        query,
-        getSessionSuggestions,
-      }),
+      getArgumentCompletions: (query: string) =>
+        buildSessionArgumentCompletions({
+          query,
+          getSessionSuggestions,
+        }),
     },
     {
       name: "session-fork",
       argumentHint: "[session-id-or-path]",
       description: "从当前会话或指定会话创建分支会话，支持补全最近会话",
-      getArgumentCompletions: (query: string) => buildSessionArgumentCompletions({
-        query,
-        getSessionSuggestions,
-      }),
+      getArgumentCompletions: (query: string) =>
+        buildSessionArgumentCompletions({
+          query,
+          getSessionSuggestions,
+        }),
     },
     {
       name: "docs-goal-new",
@@ -660,9 +662,7 @@ async function buildSessionArgumentCompletions(input: {
 
   return sessions.map((session) => ({
     value: session.sessionId,
-    label: session.sessionName
-      ? `${session.sessionName} (${session.sessionId.slice(0, 8)})`
-      : session.sessionId,
+    label: session.sessionName ? `${session.sessionName} (${session.sessionId.slice(0, 8)})` : session.sessionId,
     description: buildSessionSuggestionDescription(session),
   }));
 }
